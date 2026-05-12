@@ -1,2 +1,3 @@
 # AV-System-Metrics
-System to collect metric data related to Audio-Visual control systems
+
+A collection of systems and examples to collect metric data from Audio-Visual control systems.
