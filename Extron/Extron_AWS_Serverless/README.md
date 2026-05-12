@@ -17,6 +17,8 @@ This system may be covered mostly by the AWS "Always Free" tier for most organiz
   - Partition key: `clientname` : string
   - Sort key: `sk` : string
   - Table Settings: Customize Settings
+  
+  *Note, the 'best' way to setup the DB is to keep "On-demand" default settings as that benefits from true serverless architecture, but the safest way to make sure you stay within alway-free or to keep costs minimal is to set the below. Keep in mind data will be lost if your reads/writes exceed the capacity of one unit*
   - Read/write capacity settings
     - Provisioned
     - Read and Write Auto Scaling to Off
