@@ -5,9 +5,11 @@
 
 ## Costs
 
-This system may be covered mostly by the AWS "Always Free" tier for most organizations! Make sure to monitor, setup budgets, alerts, handle logging, and consult with your rep or admin to be sure for your use case.
+This system may be covered partially or entirely by the AWS "Always Free" tier for most organizations! Make sure to monitor, setup budgets, alerts, handle logging, and consult with your rep or admin to be sure for your use case.
 
 ## How To
+
+This guide presumes you already have an AWS admin account setup with the appropriate permissions.
 
 ### Create the Database
 
@@ -50,7 +52,7 @@ Leave the rest of the values at default
 
 `TABLE_NAME`: The name of the database table you made earlier.
 
-## Copy the code
+### Copy the code
 
 Copy `/server/metrics_aws_lambda.py` into your Lambda code editor and click deploy.
 
@@ -91,7 +93,7 @@ Invoke-RestMethod -Method POST -Uri "<your_function_uri>" `
 >>   -Headers @{Authorization = 'Bearer <your bearer token>'} `
 >>   -Body '{
 >>     "clientname": "test-client",
->>     "timestamp": "2026",
+>>     "timestamp": "2026-05-12T10:27:35.442913",
 >>     "metric": "i_am_testing",
 >>     "action": "test_executed"
 >>   }'
@@ -105,13 +107,20 @@ If configured correctly, you should see:
 True
 ```
 
-## Check your table for the test entry
+### Check your table for the test entry
 
 DynamoDB -> Tables -> `your table` > Explore Items
 
 ![explore database](images/image-4.png)
 
-### Usage Example
+### Recommended: Set Log Rotation
+
+The Lambda function is coded to only log warnings and errors, but simply invoking the function creates four log entries from Amazon by default. In order to be safe, it is recommended to set a log rotation schedule if your internal policies allow.
+
+CloudWatch -> Log Management
+![log rotation](images/image-6.png)
+
+## Usage Example
 
 Copy `metrics_aws_serverless.py` to your ECS repository. Instantiate and call it as such:
 
