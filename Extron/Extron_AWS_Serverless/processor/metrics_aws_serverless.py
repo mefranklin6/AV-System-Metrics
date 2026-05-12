@@ -143,6 +143,18 @@ class AWS_ServerlessMetrics:
         """
         self._send_metric("Trace", metric_name)
 
+    def custom(self, action: str, metric_name: str) -> None:
+        """Record a custom action, such as a button press
+
+        Args:
+            action: Name of the custom action
+            metric_name: Name of the metric
+
+        Example:
+            metric.custom("Pressed", "Btn_On")
+        """
+        self._send_metric(action, metric_name)
+
 
 if __name__ == "__main__":
     # Quick self-test. Make sure to enter your Lambda URI and Bearer Token
