@@ -21,113 +21,237 @@ BEARER_TOKEN = os.environ["BEARER_TOKEN"]
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 
+MAX_BODY_BYTES = 10_240
+MAX_FIELD_LEN = 128
+MAX_MESSAGES = 25
+
+
+class ClientError(Exception):
+    """Expected request/client error."""
+
+    def __init__(self, status_code, message, details=None):
+        self.status_code = status_code
+        self.message = message
+        self.details = details
+        super().__init__(message)
+
 
 def lambda_handler(event, context):
     source_ip = event.get("requestContext", {}).get("http", {}).get("sourceIp", "")
 
-    if ALLOWED_NET_CIDR:
-        # Check for allowed source IP
-        try:
-            if ipaddress.ip_address(source_ip) not in ALLOWED_NET:
-                logging.warning(f"Unauthorized IP: {source_ip}")
-                return response(403, {"error": "Forbidden"})
-        except ValueError:
-            logging.warning(f"Invalid IP address received: {source_ip}")
-            return response(403, {"error": "Forbidden"})
-        except Exception as e:
-            logging.error(repr(e))
-            return response(500, {"error": "Internal Server Error"})
-
-    # Check for bearer token
-    headers = event.get("headers", {}) or {}
-    auth_header = headers.get("authorization") or headers.get("Authorization")
-
-    if not auth_header or not auth_header.startswith("Bearer "):
-        logging.warning(f"Missing or invalid Authorization header: {auth_header}")
-        return response(401, {"error": "Missing or invalid Authorization header"})
-
-    token = auth_header.split(" ", 1)[1]
-
-    if not hmac.compare_digest(token, BEARER_TOKEN):
-        logging.warning("Invalid token")
-        return response(403, {"error": "Invalid token"})
-
     try:
-        method = event.get("requestContext", {}).get("http", {}).get("method")
-        if method != "POST":
-            logging.error("Method not allowed")
-            return response(405, {"error": "Method not allowed"})
+        validate_source_ip(source_ip)
+        validate_auth(event)
+        validate_method(event)
 
-        raw_body = event.get("body") or "{}"
-        if len(raw_body.encode("utf-8")) > 10_240:
-            logging.error("Request body too large")
-            return response(413, {"error": "Request body too large"})
-        body = json.loads(raw_body)
+        body = parse_body(event)
+        messages = normalize_messages(body)
 
-        clientname = body.get("clientname")
-        metric = body.get("metric")
-        action = body.get("action")
-        timestamp = body.get("timestamp")
-
-        if not clientname or not metric or not action or not timestamp:
-            logging.error("Missing required fields")
-            return response(
+        if len(messages) > MAX_MESSAGES:
+            raise ClientError(
                 400,
-                {
-                    "error": "Missing required fields: clientname, metric, action, timestamp"
-                },
+                f"Too many messages. Maximum allowed is {MAX_MESSAGES}",
             )
 
-        MAX_FIELD_LEN = 128
-        for field_name, field_value in (
-            ("clientname", clientname),
-            ("metric", metric),
-            ("action", action),
-        ):
-            if not isinstance(field_value, str) or len(field_value) > MAX_FIELD_LEN:
-                logging.error(
-                    f"Field '{field_name}' must be a string of at most {MAX_FIELD_LEN} characters"
-                )
-                return response(
-                    400,
+        items = []
+        validation_errors = []
+
+        for index, message in enumerate(messages):
+            item, error = build_item(message, source_ip)
+
+            if error:
+                validation_errors.append(
                     {
-                        "error": f"Field '{field_name}' must be a string of at most {MAX_FIELD_LEN} characters"
-                    },
+                        "index": index,
+                        "error": error,
+                    }
                 )
+            else:
+                items.append(item)
 
-        try:
-            datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        except (ValueError, AttributeError):
-            logging.error(f"Invalid timestamp format: {timestamp}")
-            return response(
-                400, {"error": "Invalid timestamp format, expected ISO 8601"}
+        if validation_errors:
+            raise ClientError(
+                400,
+                "One or more messages failed validation",
+                {"errors": validation_errors},
             )
 
-        event_id = str(uuid.uuid4())
-
-        item = {
-            "clientname": clientname,  # PK
-            "sk": f"{timestamp}#{event_id}",  # SK
-            "timestamp": timestamp,
-            "metric": metric,
-            "action": action,
-            "event_id": event_id,
-            "received_at": datetime.now(timezone.utc).isoformat(),
-            "source_ip": source_ip,
-        }
-
-        table.put_item(Item=item)
+        write_items(items)
 
         return response(
             201,
             {
                 "ok": True,
+                "count": len(items),
             },
         )
 
-    except Exception as e:
-        logging.error(repr(e))
+    except ClientError as e:
+        logging.warning(e.message)
+
+        body = {"error": e.message}
+        if e.details:
+            body.update(e.details)
+
+        return response(e.status_code, body)
+
+    except Exception:
+        logging.exception("Unexpected error while processing request")
         return response(500, {"error": "Internal Server Error"})
+
+
+def validate_source_ip(source_ip):
+    if not ALLOWED_NET_CIDR:
+        return
+
+    try:
+        if ipaddress.ip_address(source_ip) not in ALLOWED_NET:
+            logging.warning(f"Unauthorized IP: {source_ip}")
+            raise ClientError(403, "Forbidden")
+    except ValueError:
+        logging.warning(f"Invalid IP address received: {source_ip}")
+        raise ClientError(403, "Forbidden")
+
+
+def validate_auth(event):
+    headers = event.get("headers", {}) or {}
+    auth_header = headers.get("authorization") or headers.get("Authorization")
+
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise ClientError(401, "Missing or invalid Authorization header")
+
+    token = auth_header.split(" ", 1)[1]
+
+    if not hmac.compare_digest(token, BEARER_TOKEN):
+        raise ClientError(403, "Invalid token")
+
+
+def validate_method(event):
+    method = event.get("requestContext", {}).get("http", {}).get("method")
+
+    if method != "POST":
+        raise ClientError(405, "Method not allowed")
+
+
+def parse_body(event):
+    raw_body = event.get("body") or "{}"
+
+    if len(raw_body.encode("utf-8")) > MAX_BODY_BYTES:
+        raise ClientError(413, "Request body too large")
+
+    try:
+        return json.loads(raw_body)
+    except json.JSONDecodeError:
+        raise ClientError(400, "Invalid JSON body")
+
+
+def normalize_messages(body):
+    """
+    Accepts any of the following payload shapes:
+
+    Single message:
+    {
+        "clientname": "...",
+        "metric": "...",
+        "action": "...",
+        "timestamp": "..."
+    }
+
+    List of messages:
+    [
+        {
+            "clientname": "...",
+            "metric": "...",
+            "action": "...",
+            "timestamp": "..."
+        }
+    ]
+
+    Wrapped list:
+    {
+        "messages": [
+            {
+                "clientname": "...",
+                "metric": "...",
+                "action": "...",
+                "timestamp": "..."
+            }
+        ]
+    }
+    """
+
+    match body:
+        case list():
+            messages = body
+
+        case {"messages": list() as messages}:
+            pass
+
+        case dict():
+            messages = [body]
+
+        case _:
+            raise ClientError(400, "Request body must be an object or list of objects")
+
+    if not messages:
+        raise ClientError(400, "Request body must contain at least one message")
+
+    for message in messages:
+        if not isinstance(message, dict):
+            raise ClientError(400, "Each message must be an object")
+
+    return messages
+
+
+def build_item(message, source_ip):
+    clientname = message.get("clientname")
+    metric = message.get("metric")
+    action = message.get("action")
+    timestamp = message.get("timestamp")
+
+    if not clientname or not metric or not action or not timestamp:
+        return None, "Missing required fields: clientname, metric, action, timestamp"
+
+    for field_name, field_value in (
+        ("clientname", clientname),
+        ("metric", metric),
+        ("action", action),
+    ):
+        if not isinstance(field_value, str) or len(field_value) > MAX_FIELD_LEN:
+            return (
+                None,
+                f"Field '{field_name}' must be a string of at most {MAX_FIELD_LEN} characters",
+            )
+
+    if not isinstance(timestamp, str):
+        return None, "Field 'timestamp' must be a string in ISO 8601 format"
+
+    try:
+        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        logging.error(f"Invalid timestamp format: {timestamp}")
+        return None, "Invalid timestamp format, expected ISO 8601"
+
+    event_id = str(uuid.uuid4())
+
+    item = {
+        "clientname": clientname,
+        "sk": f"{timestamp}#{event_id}",
+        "timestamp": timestamp,
+        "metric": metric,
+        "action": action,
+        "event_id": event_id,
+        "received_at": datetime.now(timezone.utc).isoformat(),
+        "source_ip": source_ip,
+    }
+
+    return item, None
+
+
+def write_items(items):
+    with table.batch_writer() as batch:
+        for item in items:
+            batch.put_item(Item=item)
 
 
 def response(status_code, body):
