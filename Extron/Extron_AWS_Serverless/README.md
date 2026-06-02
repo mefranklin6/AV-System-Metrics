@@ -65,9 +65,9 @@ Copy `/server/metrics_aws_lambda.py` into your Lambda code editor and click depl
 
 Replace:
 
-- `region` → e.g. us-west-1
-- `account-id` → your AWS account ID (find in the very top right of the webpage)
-- `table-name` → your DynamoDB table name
+- `REGION` → e.g. us-west-1
+- `ACCOUNT_ID` → your AWS account ID (find in the very top right of the webpage)
+- `TABLE_NAME` → your DynamoDB table name
 
 ```json
 {
@@ -75,8 +75,11 @@ Replace:
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": "dynamodb:PutItem",
-      "Resource": "arn:aws:dynamodb:<region>:<account-id>:table/<table-name>"
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:BatchWriteItem"
+      ],
+      "Resource": "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/<>TABLE_NAME"
     }
   ]
 }
@@ -85,7 +88,7 @@ Replace:
 
 ### Do a quick test in Powershell
 
-From a workstation within the allowed IP range (if specified):
+Give it a minute or two for resources to deploy and permissions to update, then, from a workstation within the allowed IP range (if specified):
 
 ```pwsh
 Invoke-RestMethod -Method POST -Uri "<your_function_uri>" `
@@ -102,9 +105,9 @@ Invoke-RestMethod -Method POST -Uri "<your_function_uri>" `
 If configured correctly, you should see:
 
 ```pwsh
-  ok
-  --
-True
+  ok count
+  -- -----
+True     1
 ```
 
 ### Check your table for the test entry
@@ -119,6 +122,13 @@ The Lambda function is coded to only log warnings and errors, but simply invokin
 
 CloudWatch -> Log Management
 ![log rotation](images/image-6.png)
+
+## Troubleshooting
+
+If your test is getting errors, find the actual cause in the live logs:
+CloudWatch -> Logs -> Live Tail -> Select your function in the filter dropdown -> Apply filters
+
+Then you can send additional requests and see the errors as they come in.
 
 ## Usage Example
 
