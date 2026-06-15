@@ -148,3 +148,8 @@ metrics.trace("Hello World!")
 ```
 
 Note you can also run the python file on a workstation for testing without having to deploy to a processor.
+
+## Notes
+
+### Time
+All timestamps are in UTC and this is intentional
