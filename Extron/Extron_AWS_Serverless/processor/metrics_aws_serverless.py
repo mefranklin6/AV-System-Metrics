@@ -53,7 +53,7 @@ class MockLogger:
 
 
 class AWS_ServerlessMetrics:
-    __version__ = "2.0.0"
+    __version__ = "2.0.1"
 
     def __init__(
         self,
@@ -63,10 +63,10 @@ class AWS_ServerlessMetrics:
         uri: str,
         bearer_token: str,
         batch_size: int = 20,
-        flush_interval: float = 10.0,
+        flush_interval: int = 10,
         max_cache_size: int = 250,
         failure_drop_message_threshold: int = 100,
-        failure_drop_time_threshold: float = 300.0,
+        failure_drop_time_threshold: int = 300,
     ) -> None:
         self.logger = logger
         self.processor_name = processor_name
