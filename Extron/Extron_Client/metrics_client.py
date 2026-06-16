@@ -1,16 +1,19 @@
 """
-Extron Processor Module for sending batched metric data to Amazon Web Services.
+Extron Processor Module for sending batched metric data.
 
 You can also run this module on a workstation for testing.
 
+Requirements: A server or serverless system for ingestion.
+Find the ingest system code and documentation here: https://github.com/mefranklin6/AV-System-Metrics
+
 Usage Example:
 
-import metrics_aws_serverless
+from metrics_client import Metrics
 
-metrics = AWS_ServerlessMetrics(
+metrics = Metrics(
     logger=logger, # such as your instance of ProgramLog
     processor_name="my_processor",
-    uri_type="lambda",
+    uri_type="aws_lambda",
     uri="https://myrandomlambdainstance.lambda-url.us-west-1.on.aws/",
     bearer_token="myrandombearertoken",
 )
@@ -25,7 +28,7 @@ import urllib.error
 import urllib.request
 
 try:
-    from extronlib.system import Wait # type: ignore
+    from extronlib.system import Wait  # type: ignore
 except ImportError:  # Not running on Extron processor
     # Mock extronlib classes here so we can run on a workstation for testing
 
@@ -47,13 +50,14 @@ except ImportError:  # Not running on Extron processor
 
             return wrapper
 
+
 class MockLogger:
     def __call__(self, message, level="info"):
         print("{}: {}".format(level.upper(), message))
 
 
-class AWS_ServerlessMetrics:
-    __version__ = "2.0.1"
+class Metrics:
+    __version__ = "2.1.2"
 
     def __init__(
         self,
@@ -80,7 +84,7 @@ class AWS_ServerlessMetrics:
         self.failure_drop_message_threshold = failure_drop_message_threshold
         self.failure_drop_time_threshold = failure_drop_time_threshold
 
-        self.valid_uri_types = ["lambda", "api_gateway"]
+        self.valid_uri_types = ["aws_lambda", "aws_api_gateway", "self-hosted"]
 
         self._metric_cache = []
         self._flush_scheduled = False
@@ -97,9 +101,9 @@ class AWS_ServerlessMetrics:
                 "URI Type must be one of: {}".format(str(self.valid_uri_types))
             )
 
-        if self.uri_type == "api_gateway":
+        if self.uri_type == "aws_api_gateway":
             raise NotImplementedError(
-                "api_gateway is not implemented yet for AWS Serverless Metrics"
+                "aws_api_gateway is not implemented yet for AWS Serverless Metrics"
             )
 
         if not self.bearer_token:
@@ -107,11 +111,6 @@ class AWS_ServerlessMetrics:
 
         if self.batch_size < 1:
             raise ValueError("batch_size must be at least 1")
-
-        if self.batch_size > 25:
-            raise ValueError(
-                "batch_size must be 25 or less to match Lambda MAX_MESSAGES"
-            )
 
         if self.flush_interval <= 0:
             raise ValueError("flush_interval must be greater than 0")
@@ -126,6 +125,8 @@ class AWS_ServerlessMetrics:
 
         if self.failure_drop_time_threshold <= 0:
             raise ValueError("failure_drop_time_threshold must be greater than 0")
+
+        self.logger("Metrics Settings validated successfully", "info")
 
     def _can_drop_oldest_metrics(self) -> bool:
         if self._failed_message_count >= self.failure_drop_message_threshold:
@@ -156,7 +157,7 @@ class AWS_ServerlessMetrics:
         drop_count = len(self._metric_cache) - self.max_cache_size
 
         self.logger(
-            "Dropping {} oldest cached metrics after AWS send failures. Failed message count: {}".format(
+            "Dropping {} oldest cached metrics after send failures. Failed message count: {}".format(
                 drop_count,
                 self._failed_message_count,
             ),
@@ -225,13 +226,47 @@ class AWS_ServerlessMetrics:
             try:
                 with urllib.request.urlopen(req) as response:
                     self.logger(
-                        "AWS Metrics response status: {}".format(response.status),
+                        "Server response status: {}".format(response.status),
                         "info",
                     )
                     self.logger(response.read(), "info")
 
                 self._failed_message_count = 0
                 self._first_failure_time = None
+
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    self.logger(
+                        "Server rate limited request (429). Will retry {} metrics.".format(
+                            len(messages)
+                        ),
+                        "warning",
+                    )
+                    self._record_send_failure(messages)
+
+                elif 400 <= e.code < 500:
+                    self.logger(
+                        "Permanent client error {}. Dropping {} metrics.".format(
+                            e.code,
+                            len(messages),
+                        ),
+                        "error",
+                    )
+
+                    try:
+                        self.logger(e.read(), "error")
+                    except Exception:
+                        pass
+
+                else:
+                    self.logger(
+                        "Server error {}. Will retry {} metrics.".format(
+                            e.code,
+                            len(messages),
+                        ),
+                        "error",
+                    )
+                    self._record_send_failure(messages)
 
             except urllib.error.URLError as e:
                 self.logger(e, "error")
@@ -284,24 +319,24 @@ if __name__ == "__main__":
     uri = "<your_uri>"
     bearer = "<your_bearer_token>"
 
-    logger =  MockLogger()
+    logger = MockLogger()
 
-    test = AWS_ServerlessMetrics(
+    test = Metrics(
         logger,
         "test_pc",
-        "lambda",
+        "aws_lambda",  # or 'self-hosted'
         uri,
         bearer,
         flush_interval=10,
     )
-    print("Testing AWS Serverless Metrics...")
+    print("Testing Metrics...")
     print(
         "This will take {} seconds due to flush interval...".format(
             test.flush_interval + 5
         )
     )
 
-    test.trace("Hello AWS!")
+    test.trace("Hello World!")
     test.start("TestStart")
     test.stop("TestStop")
     test.custom("CustomAction", "TestCustom")
