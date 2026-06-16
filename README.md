@@ -1,19 +1,24 @@
 # AV-System-Metrics
 
-A collection of systems and examples to collect metric data from Audio-Visual control systems.
+A universal system to collect metric and usage data from commercial AV control systems and others.
 
-## Current Systems
+This system replaces and expands upon my previous project, [Extron Database Connector](https://github.com/mefranklin6/ExtronDatabaseConnector)
 
-- [Extron ECS to AWS Serverless](Extron/Extron_AWS_Serverless/README.md)
+## Hosting Options
 
-- Extron ECS to Go Container (coming soon)
+There are currently two hosting systems that will support any AV controller that can send REST requests, which should be almost all commercial AV control systems.
 
-- Extron GCP to AWS Serverless
+- [Serverless cloud-native implementation in AWS using Lambda and DynamoDB](/AWS_Serverless/README.md)
 
-- Extron GCP to Go Container (coming soon)
+- [Self-Hosted Docker Compose system using Go and PostgreSQL](/Self_Hosted/README.md)
 
-- RTi to Go Container
+## Current Supported Clients
 
-## Contributions welcome
+- [Extron Control Script](/Clients/Extron%20ECS/metrics_client.py)
+- [Generic Python 3 Module](/Clients/Extron%20ECS/metrics_client.py) (simply run the ECS module on a workstation)
+- Coming Soon: Extron Global Configurator Plus/Pro (if they make my driver)
 
-I only have access to a limited number of proprietary control systems, it would be great to have at least one solution to all the major players in the space.
+
+## Contributions encouraged
+
+I only have access to a limited number of proprietary control systems, so it would be great to have at least one solution to all the major players in the space. Please consider sending a pull request if you make one!
