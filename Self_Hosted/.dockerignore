@@ -1,0 +1,7 @@
+.git
+.gitignore
+.env
+*.log
+*.out
+metrics-ingest
+metrics-vm-go.zip

@@ -1,0 +1,35 @@
+services:
+  metrics-ingest:
+    build: .
+    image: metrics-ingest:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADDR: ":8080"
+      BEARER_TOKEN: "${BEARER_TOKEN:?Set BEARER_TOKEN in .env}"
+      DATABASE_URL: "postgres://metrics_user:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/metrics?sslmode=disable&connect_timeout=5"
+      ALLOWED_NET: "${ALLOWED_NET:-}"
+    ports:
+      - "${APP_HOST:-127.0.0.1}:${APP_PORT:-8080}:8080"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: metrics
+      POSTGRES_USER: metrics_user
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
