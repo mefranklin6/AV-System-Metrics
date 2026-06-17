@@ -12,6 +12,9 @@ Self-Hosted Docker Compose system using Go and Postgres SQL for AV system metric
 
 ## Architecture
 
+AI generated image, may contain mistakes:
+![overview_diagram](/Self_Hosted/images/self-hosted_workflow.png)
+
 Docker Compose Stack stands up:
 
 - `metrics-ingest` - the Go HTTP ingest service
