@@ -71,6 +71,7 @@ class Metrics:
         max_cache_size: int = 250,
         failure_drop_message_threshold: int = 100,
         failure_drop_time_threshold: int = 300,
+        request_timeout: float = 10.0,
     ) -> None:
         self.logger = logger
         self.processor_name = processor_name
@@ -83,6 +84,7 @@ class Metrics:
         self.max_cache_size = max_cache_size
         self.failure_drop_message_threshold = failure_drop_message_threshold
         self.failure_drop_time_threshold = failure_drop_time_threshold
+        self.request_timeout = request_timeout
 
         self.valid_uri_types = ["aws_lambda", "aws_api_gateway", "self-hosted"]
 
@@ -125,6 +127,9 @@ class Metrics:
 
         if self.failure_drop_time_threshold <= 0:
             raise ValueError("failure_drop_time_threshold must be greater than 0")
+
+        if self.request_timeout <= 0:
+            raise ValueError("request_timeout must be greater than 0")
 
         self.logger("Metrics Settings validated successfully", "info")
 
@@ -204,13 +209,18 @@ class Metrics:
 
         batch = self._metric_cache[: self.batch_size]
         self._metric_cache = self._metric_cache[self.batch_size :]
+        self._sending = True
 
-        self._send_batch(batch)
+        try:
+            self._send_batch(batch)
+        except Exception as e:
+            self.logger(e, "error")
+            self._sending = False
+            self._metric_cache = batch + self._metric_cache
+            self._schedule_flush()
 
     def _send_batch(self, messages) -> None:
         def _send_batch_inner(messages):
-            self._sending = True
-
             data = json.dumps({"messages": messages}).encode("utf-8")
 
             req = urllib.request.Request(
@@ -224,7 +234,10 @@ class Metrics:
             )
 
             try:
-                with urllib.request.urlopen(req) as response:
+                with urllib.request.urlopen(
+                    req,
+                    timeout=self.request_timeout,
+                ) as response:
                     self.logger(
                         "Server response status: {}".format(response.status),
                         "info",
