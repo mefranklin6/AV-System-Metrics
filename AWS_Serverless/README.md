@@ -2,7 +2,7 @@
 
 AWS Serverless system using Lambda and DynamoDB for AV system metric ingestion.
 
-- Client: Any control system that can sent REST web requests
+- Client: Any control system that can send REST web requests
 - Server: Amazon Web Services Serverless (Lambda, DynamoDB)
 
 ## Costs
@@ -39,7 +39,7 @@ Lambda -> Functions -> Create Function:
 - Additional Settings
   - Check `ARM64 architecture`
   - Check `Function URL`
-    - Set Auth type to `NONE` (we handle IAM in the function)
+    - Set Auth type to `NONE` (the function handles bearer-token authentication)
 
 Leave the rest of the values at default
 
@@ -48,7 +48,7 @@ Leave the rest of the values at default
 ![Code Editor Env Variables](images/image-3.png)
 ![Env Var Editor](images/image-2.png)
 
-`ALLOWED_NET_CIDR`: Optional CIDR network notation of what client IP's are allowed communicate with the function. It is recommended you set this to only the public IP(s) of your network. Example: 132.241.50.0/24 (covers 132.241.50.0 - 132.241.50.255). If you're using NAT and only have one public IP that all your devices communicate from, use `your_address/32`. If no address is specified any IP can call the function, but they'll still need the bearer token to perform any actions.
+`ALLOWED_NET`: Optional CIDR network notation of what client IPs are allowed to communicate with the function. It is recommended you set this to only the public IP(s) of your network. Example: 132.241.50.0/24 (covers 132.241.50.0 - 132.241.50.255). If you're using NAT and only have one public IP that all your devices communicate from, use `your_address/32`. If no address is specified any IP can call the function, but they'll still need the bearer token to perform any actions.
 
 `BEARER_TOKEN`: Generate your own random alphanumeric string. Keep this a secret. This is your client authentication and is required before the function will write anything to the database.
 
@@ -56,7 +56,7 @@ Leave the rest of the values at default
 
 ### Copy the code
 
-Copy `/server/metrics_aws_lambda.py` into your Lambda code editor and click deploy.
+Copy `AWS_Serverless/lambda_function.py` into your Lambda code editor and click deploy.
 
 ### Grant Database Write Access to the Lambda Function
 
@@ -81,7 +81,7 @@ Replace:
         "dynamodb:PutItem",
         "dynamodb:BatchWriteItem"
       ],
-      "Resource": "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/<>TABLE_NAME"
+      "Resource": "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/<TABLE_NAME>"
     }
   ]
 }
@@ -98,7 +98,7 @@ Invoke-RestMethod -Method POST -Uri "<your_function_uri>" `
 >>   -Headers @{Authorization = 'Bearer <your bearer token>'} `
 >>   -Body '{
 >>     "clientname": "test-client",
->>     "timestamp": "2026-05-12T10:27:35.442913",
+>>     "timestamp": "2026-05-12T10:27:35.442913+00:00",
 >>     "metric": "i_am_testing",
 >>     "action": "test_executed"
 >>   }'
@@ -125,6 +125,10 @@ The Lambda function is coded to only log warnings and errors, but simply invokin
 CloudWatch -> Log Management
 ![log rotation](images/image-6.png)
 
+## Client Implementation
+
+See the readme for your system in [Clients folder](/Clients/)
+
 ## Troubleshooting
 
 If your test is getting errors, find the actual cause in the live logs:
@@ -132,26 +136,8 @@ CloudWatch -> Logs -> Live Tail -> Select your function in the filter dropdown -
 
 Then you can send additional requests and see the errors as they come in.
 
-## Usage Example
-
-Copy `Extron_Client/metrics_client.py` to your ECS repository. Instantiate and call it as such:
-
-```python
-from metrics_client import Metrics
-
-metrics = Metrics(
-    processor_name="my_processor",
-    uri_type="lambda",
-    uri="https://myrandomlambdainstance.lambda-url.us-west-1.on.aws/",
-    bearer_token="myrandombearertoken"
-)
-
-metrics.trace("Hello World!")
-```
-
-Note you can also run the python file on a workstation for testing without having to deploy to a processor.
-
 ## Notes
 
 ### Time
+
 All timestamps are in UTC and this is intentional
