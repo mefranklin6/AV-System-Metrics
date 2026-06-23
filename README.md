@@ -1,6 +1,6 @@
 # AV-System-Metrics
 
-A collection of systems to gather metric and usage data from commercial AV control systems and related devices.
+A standardized collection of systems to gather metric and usage data from commercial AV control systems and related devices.
 
 This system replaces and expands upon my previous project: [Extron Database Connector](https://github.com/mefranklin6/ExtronDatabaseConnector)
 
@@ -25,10 +25,22 @@ There are currently two hosting systems that will support any AV controller or d
 
 ## Current Supported Clients
 
+### Fully tested and validated
+
 - [Extron Control Script](/Clients/Extron%20ECS/metrics_client.py)
 - [Generic Python 3 Module](/Clients/Extron%20ECS/metrics_client.py) (simply run the ECS module on a workstation)
-- Coming Soon: Extron Global Configurator Plus/Pro (if they make my driver!)
-- Don't see your system here? Consider making one with the included [Developer Guide](/Clients/Developer%20Guide/README.md)
+
+### AI-written and not yet tested
+
+- [Crestron C# Client](/Clients/Crestron_AI_Generated/README.md)
+- [AMX MUSE Python Client](/Clients/AMX_AI_Generated/README.md)
+- [QSC Q-SYS Lua Client](/Clients/QSC_AI_Generated/README.md)
+
+Coming Soon: Extron Global Configurator Plus/Pro (if they make my driver!)
+
+Don't see your system here? Consider making one with the included [Developer Guide](/Clients/Developer%20Guide/README.md)
+
+Tried one of the AI-written clients? Please provide feedback on your experience, any issues encountered, and any improvements that could be made. This will help in validating and refining these clients for broader use.
 
 ## Result
 
