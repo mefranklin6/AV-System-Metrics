@@ -1,8 +1,8 @@
 # AV-System-Metrics: Self-Hosted
 
-Self-Hosted Docker Compose system using Go and Postgres SQL for AV system metric ingestion.
+Self-Hosted Docker Compose system using Go and PostgreSQL for AV system metric ingestion.
 
-- Client: Any control system that can sent REST web requests
+- Client: Any control system that can send REST web requests
 - Server: Any server or VM running Docker Engine
 
 ## Requirements
