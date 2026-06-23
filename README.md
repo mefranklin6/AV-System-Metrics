@@ -4,6 +4,17 @@ A standardized collection of systems to gather metric and usage data from commer
 
 This system replaces and expands upon my previous project: [Extron Database Connector](https://github.com/mefranklin6/ExtronDatabaseConnector)
 
+## Reason
+
+This system is for you if you've ever been asked:
+
+- "How often is the camera actually used in this room?",
+- "Can we get rid of this input device?",
+- "When was the system last turned off?",
+- "Has anyone ever pressed this button?"
+
+Granular usage and metric data from your AV control systems and related devices, providing insights into how the systems are actually being used and helping inform decisions about system management, optimization and UX design.
+
 ## Overview
 
 ![main overview](/images/main_overview.png)
@@ -13,7 +24,7 @@ Control processors send data to a server (or serverless cloud function) which in
 ## Setup
 
 1. Choose a hosting option below. Follow the readme file in the corresponding folder for detailed setup instructions.
-2. Incorporate the appropriate client code/driver/module into your existing control system, or see the included [Developer Guide](/Clients/Developer%20Guide/README.md) for making your own if your system is not included yet (please consider contributing!)
+2. Incorporate the appropriate client code/driver/module into your existing control system. See the Supported Clients section below and follow the readme documents.
 
 ## Hosting Options
 
@@ -23,22 +34,26 @@ There are currently two hosting systems that will support any AV controller or d
 
 - [Self-Hosted Docker Compose system using Go and PostgreSQL](/Self_Hosted/README.md)
 
-## Current Supported Clients
+## Supported Clients
 
 ### Fully tested and validated
 
-- [Extron Control Script](/Clients/Extron%20ECS/metrics_client.py)
-- [Generic Python 3 Module](/Clients/Extron%20ECS/metrics_client.py) (simply run the ECS module on a workstation)
+- [Extron Control Script Python](/Clients/Extron%20ECS/metrics_client.py)
+- [Generic Python 3](/Clients/Extron%20ECS/metrics_client.py) (simply run the ECS module on a workstation)
 
 ### AI-written and not yet tested
 
-- [Crestron C# Client](/Clients/Crestron_AI_Generated/README.md)
-- [AMX MUSE Python Client](/Clients/AMX_AI_Generated/README.md)
-- [QSC Q-SYS Lua Client](/Clients/QSC_AI_Generated/README.md)
+- [Crestron C#](/Clients/Crestron_AI_Generated/README.md)
+- [AMX MUSE Python](/Clients/AMX_AI_Generated/README.md) (Pure Python implementation tested working on a workstation)
+- [QSC Q-SYS Lua](/Clients/QSC_AI_Generated/README.md)
 
-Coming Soon: Extron Global Configurator Plus/Pro (if they make my driver!)
+### Build your own
 
 Don't see your system here? Consider making one with the included [Developer Guide](/Clients/Developer%20Guide/README.md)
+
+### Future Support
+
+- Extron Global Configurator Plus/Pro if Extron agrees. I want to really fine tune the system before I ask them to port it to a GCP driver.
 
 Tried one of the AI-written clients? Please provide feedback on your experience, any issues encountered, and any improvements that could be made. This will help in validating and refining these clients for broader use.
 
