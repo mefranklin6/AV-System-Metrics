@@ -8,7 +8,7 @@ Self-Hosted Docker Compose system using Go and PostgreSQL for AV system metric i
 ## Requirements
 
 - A server running Docker Engine with Docker Compose and a SSH console session to said server. This server can be a virtual machine.
-- `curl` or another way to download two text files to the server.
+- `curl` or another way to download the stack files to the server.
 - Module added to your control processor codebase. See the "Clients" folder for current supported systems, or please consider writing one and sending a PR to add it here if your system is not listed.
 
 ## Architecture
@@ -24,7 +24,7 @@ Docker Compose Stack stands up:
 
 The app container applies the database schema at startup, so the server does not need a local `schema.sql` file.
 
-PostgreSQL is only available inside the Compose network. It is not published to the host.
+PostgreSQL is only available inside the Compose network by default. Set `EXPOSE_DATABASE=true` in `.env` when you need to publish it for pgAdmin or similar database tools.
 
 ### Endpoints
 
@@ -36,6 +36,7 @@ PostgreSQL is only available inside the Compose network. It is not published to 
 You do not need to clone this repository on the server. The app container is prebuilt and published to GHCR, so the server only needs:
 
 - `docker-compose.yml` - defines the app and PostgreSQL services
+- `docker-compose.database-expose-false.yml` and `docker-compose.database-expose-true.yml` - Compose overrides controlled by `EXPOSE_DATABASE`
 - `.env` - local secrets and runtime settings
 
 Create a working directory and download the stack files:
@@ -48,20 +49,27 @@ AVSM_REF=main
 BASE_URL="https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics/${AVSM_REF}/Self_Hosted"
 
 curl -fsSL "${BASE_URL}/docker-compose.yml" -o docker-compose.yml
+curl -fsSL "${BASE_URL}/docker-compose.database-expose-false.yml" -o docker-compose.database-expose-false.yml
+curl -fsSL "${BASE_URL}/docker-compose.database-expose-true.yml" -o docker-compose.database-expose-true.yml
 curl -fsSL "${BASE_URL}/.env.example" -o .env
 ```
 
-Leave `docker-compose.yml` and `.env` together in this directory. Edit `.env` with your preferred editor before starting the stack:
+Leave all downloaded files together in this directory. Edit `.env` with your preferred editor before starting the stack:
 
 Configuration values:
 
 - `BEARER_TOKEN` - required. Make it a long random string and keep a note of it for when you setup your clients.
 - `POSTGRES_PASSWORD` - required; password for the Compose-managed PostgreSQL user. Keep this URL-Safe; Avoid characters such as `@`, `/`, `:`, `?`, `#`, `&`, and spaces
+- `EXPOSE_DATABASE` - optional; set to `true` to publish PostgreSQL for pgAdmin or similar tools. Defaults to `false`.
+- `DATABASE_HOST` - optional; host address Docker binds for PostgreSQL when `EXPOSE_DATABASE=true`. Defaults to `127.0.0.1`.
+- `DATABASE_PORT` - optional; host port Docker publishes for PostgreSQL when `EXPOSE_DATABASE=true`. Defaults to `5432`.
 - `APP_HOST` - optional; host address Docker binds for the app. Defaults to `127.0.0.1` which is for testing and reverse proxy usage. If you need to expose the service, use `0.0.0.0` but only on a trusted network.
 - `APP_PORT` - optional; host port Docker publishes for the app. Defaults to `8080`.
 - `ALLOWED_NET` - optional CIDR allow-list, for example `203.0.113.0/24`.
 - `METRICS_INGEST_IMAGE` - optional; app image to run. Defaults to `ghcr.io/mefranklin6/av-system-metrics/metrics-ingest:latest`.
 - `METRICS_INGEST_PULL_POLICY` - optional; Docker Compose pull behavior for the app image. Defaults to `always`.
+
+Keep `COMPOSE_PATH_SEPARATOR` and `COMPOSE_FILE` in `.env`. Docker Compose reads `docker-compose.yml` first, then selects either `docker-compose.database-expose-false.yml` or `docker-compose.database-expose-true.yml` from the `EXPOSE_DATABASE` flag. The `false` file intentionally changes nothing. The `true` file adds the PostgreSQL host port mapping.
 
 ## Start
 
@@ -83,7 +91,7 @@ docker compose pull
 docker compose up -d
 ```
 
-To refresh the Compose file from the repository, rerun the download commands from the Configure section. Existing PostgreSQL data stays in the Docker volume unless you intentionally run `docker compose down -v`.
+To refresh the Compose files from the repository, rerun the download commands from the Configure section. Existing PostgreSQL data stays in the Docker volume unless you intentionally run `docker compose down -v`.
 
 To pin a specific app image version, set `METRICS_INGEST_IMAGE` in `.env` to a branch tag or SHA tag published by CI:
 
@@ -141,12 +149,14 @@ Older setup instructions mounted `schema.sql` into the PostgreSQL container. On 
 psql: error: /docker-entrypoint-initdb.d/001_schema.sql: Permission denied
 ```
 
-Current installs no longer use that mount. Refresh `docker-compose.yml`, pull the current app image, and restart:
+Current installs no longer use that mount. Refresh the Compose files, pull the current app image, and restart:
 
 ```sh
 AVSM_REF=main
 BASE_URL="https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics/${AVSM_REF}/Self_Hosted"
 curl -fsSL "${BASE_URL}/docker-compose.yml" -o docker-compose.yml
+curl -fsSL "${BASE_URL}/docker-compose.database-expose-false.yml" -o docker-compose.database-expose-false.yml
+curl -fsSL "${BASE_URL}/docker-compose.database-expose-true.yml" -o docker-compose.database-expose-true.yml
 
 docker compose pull
 docker compose up -d
@@ -181,6 +191,24 @@ Show recent events in psql:
 ```sql
 SELECT clientname, metric, action, event_timestamp, received_at FROM metric_events ORDER BY received_at DESC LIMIT 10;
 ```
+
+To inspect the database from pgAdmin, DBeaver, Power BI, or another external tool, set these values in `.env` and restart the stack:
+
+```sh
+EXPOSE_DATABASE=true
+DATABASE_HOST=127.0.0.1
+DATABASE_PORT=5432
+```
+
+Then connect with:
+
+- Host: `127.0.0.1` or the server address when `DATABASE_HOST=0.0.0.0`
+- Port: the value of `DATABASE_PORT`
+- Database: `metrics`
+- Username: `metrics_user`
+- Password: the value of `POSTGRES_PASSWORD`
+
+Use `DATABASE_HOST=127.0.0.1` for local tools or SSH tunnels. Use `DATABASE_HOST=0.0.0.0` only on a trusted admin network or behind firewall rules that limit who can reach the database port.
 
 ## View logs
 
@@ -254,6 +282,7 @@ It is best practice to lock down your firewall rules to only the below, and rout
 
 - Trusted admin workstation to server SSH for administration
 - Control Processors to whatever port you selected in your .env
+- Trusted admin workstation to the database port only when `EXPOSE_DATABASE=true`
 
 ## Limits
 

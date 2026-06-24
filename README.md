@@ -61,7 +61,7 @@ Tried one of the AI-written clients? Please provide feedback on your experience,
 
 After initial setup and deployment, you will end up with a database containing usage and metric data as such: ![database_schema](/images/db_schema.png)
 
-You can then analyze the data with scripts or visualize it in tools like PowerBI ![power_bi_example](/images/power_bi_example.png)
+You can then analyze the data with scripts or visualize it in tools like PowerBI. The self-hosted PostgreSQL deployment can also publish a database port for pgAdmin or similar tools when explicitly enabled in its `.env` file. ![power_bi_example](/images/power_bi_example.png)
 
 ## Contributions encouraged
 
