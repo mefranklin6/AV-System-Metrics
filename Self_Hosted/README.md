@@ -3,11 +3,11 @@
 Self-Hosted Docker Compose system using Go and PostgreSQL for AV system metric ingestion.
 
 - Client: Any control system that can send REST web requests
-- Server: Any server or VM running Docker Engine
+- Server: Any server or VM running Docker Engine with Docker Compose
 
 ## Requirements
 
-- A server running Docker Engine and a SSH console session to said server. This server can be a virtual machine.
+- A server running Docker Engine with Docker Compose and a SSH console session to said server. This server can be a virtual machine.
 - Module added to your control processor codebase. See the "Clients" folder for current supported systems, or please consider writing one and sending a PR to add it here if your system is not listed.
 
 ## Architecture
@@ -17,7 +17,7 @@ AI generated image, may contain mistakes:
 
 Docker Compose Stack stands up:
 
-- `metrics-ingest` - the Go HTTP ingest service
+- `metrics-ingest` - the Go HTTP ingest service, published at `ghcr.io/mefranklin6/av-system-metrics/metrics-ingest`
 - `postgres` - PostgreSQL using the Alpine image
 - `postgres_data` - named Docker volume for database persistence
 
@@ -47,14 +47,51 @@ Configuration values:
 - `APP_HOST` - optional; host address Docker binds for the app. Defaults to `127.0.0.1` which is for testing and reverse proxy usage. If you need to expose the service, use `0.0.0.0` but only on a trusted network.
 - `APP_PORT` - optional; host port Docker publishes for the app. Defaults to `8080`.
 - `ALLOWED_NET` - optional CIDR allow-list, for example `203.0.113.0/24`.
+- `METRICS_INGEST_IMAGE` - optional; app image to run. Defaults to `ghcr.io/mefranklin6/av-system-metrics/metrics-ingest:latest`.
+- `METRICS_INGEST_PULL_POLICY` - optional; Docker Compose pull behavior for the app image. Defaults to `always`.
 
 ## Start
 
-Build and start the full stack:
+Pull and start the full stack using the prebuilt containers:
 
 ```sh
-docker compose up --build -d
+docker compose pull
+docker compose up -d
 ```
+
+The stack uses the public GHCR app image and the upstream PostgreSQL image. You do not need Go installed on the server.
+
+To update later:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+To pin a specific app image version, set `METRICS_INGEST_IMAGE` in `.env` to a branch tag or SHA tag published by CI:
+
+```sh
+METRICS_INGEST_IMAGE=ghcr.io/mefranklin6/av-system-metrics/metrics-ingest:sha-<commit>
+```
+
+## Local build
+
+If you are developing the service and want to run a locally built image:
+
+```sh
+docker build -t metrics-ingest:local .
+METRICS_INGEST_IMAGE=metrics-ingest:local METRICS_INGEST_PULL_POLICY=never docker compose up -d
+```
+
+## Image publishing
+
+The `.github/workflows/self-hosted-ghcr.yml` workflow builds and publishes the `metrics-ingest` image to GHCR when a push changes `Self_Hosted/**` or the workflow file itself. It publishes:
+
+- `latest` for the repository default branch
+- a sanitized branch tag for branch pushes
+- `sha-<commit>` for every scoped push
+
+GHCR package visibility is managed in GitHub Packages. After the first publish, confirm the package visibility is set to Public so unauthenticated servers can pull it.
 
 ## Test request
 

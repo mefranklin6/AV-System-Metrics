@@ -1,7 +1,7 @@
 services:
   metrics-ingest:
-    build: .
-    image: metrics-ingest:latest
+    image: ${METRICS_INGEST_IMAGE:-ghcr.io/mefranklin6/av-system-metrics/metrics-ingest:latest}
+    pull_policy: ${METRICS_INGEST_PULL_POLICY:-always}
     depends_on:
       postgres:
         condition: service_healthy
