@@ -8,6 +8,7 @@ Self-Hosted Docker Compose system using Go and PostgreSQL for AV system metric i
 ## Requirements
 
 - A server running Docker Engine with Docker Compose and a SSH console session to said server. This server can be a virtual machine.
+- `curl` or another way to download three text files to the server.
 - Module added to your control processor codebase. See the "Clients" folder for current supported systems, or please consider writing one and sending a PR to add it here if your system is not listed.
 
 ## Architecture
@@ -30,15 +31,27 @@ PostgreSQL is only available inside the Compose network. It is not published to 
 
 ## Configure
 
-Copy the folder that contains this readme to your server and `cd` to the folder on your server.
+You do not need to clone this repository on the server. The app container is prebuilt and published to GHCR, so the server only needs:
 
-Create a local `.env` file:
+- `docker-compose.yml` - defines the app and PostgreSQL services
+- `schema.sql` - initializes the PostgreSQL tables on first startup
+- `.env` - local secrets and runtime settings
+
+Create a working directory and download the stack files:
 
 ```sh
-cp .env.example .env
+mkdir -p av-system-metrics-self-hosted
+cd av-system-metrics-self-hosted
+
+AVSM_REF=main
+BASE_URL="https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics/${AVSM_REF}/Self_Hosted"
+
+curl -fsSL "${BASE_URL}/docker-compose.yml" -o docker-compose.yml
+curl -fsSL "${BASE_URL}/schema.sql" -o schema.sql
+curl -fsSL "${BASE_URL}/.env.example" -o .env
 ```
 
-Edit `.env` with your preferred editor before starting the stack:
+Leave `docker-compose.yml`, `schema.sql`, and `.env` together in this directory. Edit `.env` with your preferred editor before starting the stack:
 
 Configuration values:
 
@@ -52,7 +65,7 @@ Configuration values:
 
 ## Start
 
-Pull and start the full stack using the prebuilt containers:
+Pull and start the full stack from the directory containing `docker-compose.yml`:
 
 ```sh
 docker compose pull
@@ -61,12 +74,14 @@ docker compose up -d
 
 The stack uses the public GHCR app image and the upstream PostgreSQL image. You do not need Go installed on the server.
 
-To update later:
+To update the running app and database images later:
 
 ```sh
 docker compose pull
 docker compose up -d
 ```
+
+To refresh the Compose or schema files from the repository, rerun the download commands from the Configure section. Existing PostgreSQL data stays in the Docker volume unless you intentionally run `docker compose down -v`.
 
 To pin a specific app image version, set `METRICS_INGEST_IMAGE` in `.env` to a branch tag or SHA tag published by CI:
 
@@ -76,7 +91,7 @@ METRICS_INGEST_IMAGE=ghcr.io/mefranklin6/av-system-metrics/metrics-ingest:sha-<c
 
 ## Local build
 
-If you are developing the service and want to run a locally built image:
+Cloning the repository is only needed when you are developing the service or building the image yourself. From the `Self_Hosted` source directory:
 
 ```sh
 docker build -t metrics-ingest:local .
