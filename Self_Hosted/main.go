@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,9 @@ INSERT INTO metric_events
 VALUES
     ($1, $2, $3, $4, $5, $6, $7, $8)`
 )
+
+//go:embed schema.sql
+var schemaSQL string
 
 type config struct {
 	addr        string
@@ -81,6 +85,10 @@ func main() {
 		log.Fatalf("database error: %v", err)
 	}
 	defer db.Close()
+
+	if err := applySchema(context.Background(), db); err != nil {
+		log.Fatalf("schema error: %v", err)
+	}
 
 	srv := &server{cfg: cfg, db: db}
 
@@ -172,6 +180,14 @@ func openDB(ctx context.Context, dsn string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func applySchema(ctx context.Context, db *sql.DB) error {
+	schemaCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	_, err := db.ExecContext(schemaCtx, schemaSQL)
+	return err
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {

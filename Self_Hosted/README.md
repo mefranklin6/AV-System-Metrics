@@ -8,7 +8,7 @@ Self-Hosted Docker Compose system using Go and PostgreSQL for AV system metric i
 ## Requirements
 
 - A server running Docker Engine with Docker Compose and a SSH console session to said server. This server can be a virtual machine.
-- `curl` or another way to download three text files to the server.
+- `curl` or another way to download two text files to the server.
 - Module added to your control processor codebase. See the "Clients" folder for current supported systems, or please consider writing one and sending a PR to add it here if your system is not listed.
 
 ## Architecture
@@ -22,6 +22,8 @@ Docker Compose Stack stands up:
 - `postgres` - PostgreSQL using the Alpine image
 - `postgres_data` - named Docker volume for database persistence
 
+The app container applies the database schema at startup, so the server does not need a local `schema.sql` file.
+
 PostgreSQL is only available inside the Compose network. It is not published to the host.
 
 ### Endpoints
@@ -34,7 +36,6 @@ PostgreSQL is only available inside the Compose network. It is not published to 
 You do not need to clone this repository on the server. The app container is prebuilt and published to GHCR, so the server only needs:
 
 - `docker-compose.yml` - defines the app and PostgreSQL services
-- `schema.sql` - initializes the PostgreSQL tables on first startup
 - `.env` - local secrets and runtime settings
 
 Create a working directory and download the stack files:
@@ -47,11 +48,10 @@ AVSM_REF=main
 BASE_URL="https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics/${AVSM_REF}/Self_Hosted"
 
 curl -fsSL "${BASE_URL}/docker-compose.yml" -o docker-compose.yml
-curl -fsSL "${BASE_URL}/schema.sql" -o schema.sql
 curl -fsSL "${BASE_URL}/.env.example" -o .env
 ```
 
-Leave `docker-compose.yml`, `schema.sql`, and `.env` together in this directory. Edit `.env` with your preferred editor before starting the stack:
+Leave `docker-compose.yml` and `.env` together in this directory. Edit `.env` with your preferred editor before starting the stack:
 
 Configuration values:
 
@@ -74,6 +74,8 @@ docker compose up -d
 
 The stack uses the public GHCR app image and the upstream PostgreSQL image. You do not need Go installed on the server.
 
+On startup, `metrics-ingest` connects to PostgreSQL and creates or repairs the required database table and indexes.
+
 To update the running app and database images later:
 
 ```sh
@@ -81,7 +83,7 @@ docker compose pull
 docker compose up -d
 ```
 
-To refresh the Compose or schema files from the repository, rerun the download commands from the Configure section. Existing PostgreSQL data stays in the Docker volume unless you intentionally run `docker compose down -v`.
+To refresh the Compose file from the repository, rerun the download commands from the Configure section. Existing PostgreSQL data stays in the Docker volume unless you intentionally run `docker compose down -v`.
 
 To pin a specific app image version, set `METRICS_INGEST_IMAGE` in `.env` to a branch tag or SHA tag published by CI:
 
@@ -129,6 +131,33 @@ Check database health through the service:
 
 ```sh
 curl -i http://127.0.0.1:8080/health
+```
+
+## Schema Troubleshooting
+
+Older setup instructions mounted `schema.sql` into the PostgreSQL container. On Linux servers with restrictive file permissions, PostgreSQL could fail with:
+
+```text
+psql: error: /docker-entrypoint-initdb.d/001_schema.sql: Permission denied
+```
+
+Current installs no longer use that mount. Refresh `docker-compose.yml`, pull the current app image, and restart:
+
+```sh
+AVSM_REF=main
+BASE_URL="https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics/${AVSM_REF}/Self_Hosted"
+curl -fsSL "${BASE_URL}/docker-compose.yml" -o docker-compose.yml
+
+docker compose pull
+docker compose up -d
+```
+
+If you already have a running PostgreSQL container from the older setup and want to apply your local `schema.sql` without deleting data:
+
+```sh
+cat schema.sql | docker compose exec -T postgres psql -U metrics_user -d metrics -v ON_ERROR_STOP=1
+docker compose restart metrics-ingest
+docker compose exec postgres psql -U metrics_user -d metrics -c '\dt'
 ```
 
 ## Inspecting the Database
@@ -185,7 +214,7 @@ Stop containers and delete PostgreSQL data:
 docker compose down -v
 ```
 
-Use `docker compose down -v` when you want PostgreSQL to re-run schema initialization from scratch.
+Use `docker compose down -v` only when you intentionally want to delete stored metric data. The app will recreate the schema on next startup.
 
 ## Accepted payload shapes
 
