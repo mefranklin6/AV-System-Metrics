@@ -203,6 +203,22 @@ def normalize_messages(body):
     return messages
 
 
+def parse_timestamp(timestamp):
+    if not isinstance(timestamp, str):
+        return None, "Field 'timestamp' must be a string in ISO 8601 format"
+
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        logging.error(f"Invalid timestamp format: {timestamp}")
+        return None, "Invalid timestamp format, expected ISO 8601"
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+
+    return parsed.astimezone(timezone.utc), None
+
+
 def build_item(message, source_ip):
     clientname = message.get("clientname")
     metric = message.get("metric")
@@ -223,29 +239,29 @@ def build_item(message, source_ip):
                 f"Field '{field_name}' must be a string of at most {MAX_FIELD_LEN} characters",
             )
 
-    if not isinstance(timestamp, str):
-        return None, "Field 'timestamp' must be a string in ISO 8601 format"
-
-    try:
-        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-    except ValueError:
-        logging.error(f"Invalid timestamp format: {timestamp}")
-        return None, "Invalid timestamp format, expected ISO 8601"
+    event_timestamp, error = parse_timestamp(timestamp)
+    if error:
+        return None, error
 
     event_id = str(uuid.uuid4())
+    timestamp_utc = format_utc_timestamp(event_timestamp)
 
     item = {
         "clientname": clientname,
-        "sk": f"{timestamp}#{event_id}",
-        "timestamp": timestamp,
+        "sk": f"{timestamp_utc}#{event_id}",
+        "timestamp": timestamp_utc,
         "metric": metric,
         "action": action,
         "event_id": event_id,
-        "received_at": datetime.now(timezone.utc).isoformat(),
+        "received_at": format_utc_timestamp(datetime.now(timezone.utc)),
         "source_ip": source_ip,
     }
 
     return item, None
+
+
+def format_utc_timestamp(timestamp):
+    return timestamp.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def write_items(items):
