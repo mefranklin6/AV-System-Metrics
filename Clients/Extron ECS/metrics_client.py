@@ -239,12 +239,12 @@ class Metrics:
                     timeout=self.request_timeout,
                 ) as response:
                     response_body = response.read().decode("utf-8", "replace")
-                    self.logger(
-                        "Server response status: {}".format(response.status),
-                        "info",
-                    )
-                    if response_body:
-                        self.logger(response_body, "info")
+                    # self.logger(
+                    #     "Server response status: {}".format(response.status),
+                    #     "info",
+                    # )
+                    # if response_body:
+                    #     self.logger(response_body, "info")
 
                     ack_ok, ack_error = self._validate_server_ack(
                         response_body,
