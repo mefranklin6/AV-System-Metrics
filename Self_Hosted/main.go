@@ -66,7 +66,7 @@ type validationError struct {
 type metricItem struct {
 	ClientName     string
 	SortKey        string
-	EventTimestamp string
+	EventTimestamp time.Time
 	Metric         string
 	Action         string
 	EventID        string
@@ -428,7 +428,8 @@ func buildItem(message map[string]any, sourceIP string) (metricItem, string, err
 		return metricItem{}, "Field 'timestamp' must be a string in ISO 8601 format", nil
 	}
 
-	if !isISO8601Timestamp(timestamp) {
+	eventTimestamp, ok := parseTimestamp(timestamp)
+	if !ok {
 		log.Printf("invalid timestamp format: %s", timestamp)
 		return metricItem{}, "Invalid timestamp format, expected ISO 8601", nil
 	}
@@ -438,10 +439,12 @@ func buildItem(message map[string]any, sourceIP string) (metricItem, string, err
 		return metricItem{}, "", err
 	}
 
+	eventTimestamp = eventTimestamp.UTC()
+
 	return metricItem{
 		ClientName:     clientName,
-		SortKey:        timestamp + "#" + eventID,
-		EventTimestamp: timestamp,
+		SortKey:        formatSortTimestamp(eventTimestamp) + "#" + eventID,
+		EventTimestamp: eventTimestamp,
 		Metric:         metric,
 		Action:         action,
 		EventID:        eventID,
@@ -462,7 +465,7 @@ func fieldLengthError(fieldName string) string {
 	return fmt.Sprintf("Field '%s' must be a string of at most %d characters", fieldName, maxFieldLen)
 }
 
-func isISO8601Timestamp(value string) bool {
+func parseTimestamp(value string) (time.Time, bool) {
 	layouts := []string{
 		time.RFC3339Nano,
 		"2006-01-02T15:04:05",
@@ -471,13 +474,26 @@ func isISO8601Timestamp(value string) bool {
 		"2006-01-02 15:04:05.999999999",
 	}
 
-	for _, layout := range layouts {
-		if _, err := time.Parse(layout, value); err == nil {
-			return true
+	for i, layout := range layouts {
+		var (
+			t   time.Time
+			err error
+		)
+		if i == 0 {
+			t, err = time.Parse(layout, value)
+		} else {
+			t, err = time.ParseInLocation(layout, value, time.UTC)
+		}
+		if err == nil {
+			return t.UTC(), true
 		}
 	}
 
-	return false
+	return time.Time{}, false
+}
+
+func formatSortTimestamp(value time.Time) string {
+	return value.UTC().Format("2006-01-02T15:04:05.000000000Z")
 }
 
 func newUUIDv4() (string, error) {

@@ -22,7 +22,7 @@ Docker Compose Stack stands up:
 - `postgres` - PostgreSQL using the Alpine image
 - `postgres_data` - named Docker volume for database persistence
 
-The app container applies the database schema at startup, so the server does not need a local `schema.sql` file.
+The app container applies and migrates the database schema at startup, so the server does not need a local `schema.sql` file.
 
 PostgreSQL is only available inside the Compose network by default. Set `EXPOSE_DATABASE=true` in `.env` when you need to publish it for pgAdmin or similar database tools.
 
@@ -82,7 +82,7 @@ docker compose up -d
 
 The stack uses the public GHCR app image and the upstream PostgreSQL image. You do not need Go installed on the server.
 
-On startup, `metrics-ingest` connects to PostgreSQL and creates or repairs the required database table and indexes.
+On startup, `metrics-ingest` connects to PostgreSQL and creates or migrates the required database table and indexes.
 
 To update the running app and database images later:
 
@@ -135,6 +135,8 @@ Successful requests return HTTP `201`:
 {"ok":true,"count":1}
 ```
 
+Clients send `timestamp` as an ISO 8601 JSON string. The service parses that value, normalizes it to UTC, and stores it in PostgreSQL as `TIMESTAMPTZ` in the `event_timestamp` column. Payloads with timezone offsets are converted to the same instant in UTC; timezone-less accepted values are treated as UTC for compatibility.
+
 Check database health through the service:
 
 ```sh
@@ -162,7 +164,7 @@ docker compose pull
 docker compose up -d
 ```
 
-If you already have a running PostgreSQL container from the older setup and want to apply your local `schema.sql` without deleting data:
+If you already have a running PostgreSQL container from the older setup and want to apply your local `schema.sql` migration without deleting data:
 
 ```sh
 cat schema.sql | docker compose exec -T postgres psql -U metrics_user -d metrics -v ON_ERROR_STOP=1
@@ -189,7 +191,21 @@ SELECT count(*) FROM metric_events;
 Show recent events in psql:
 
 ```sql
-SELECT clientname, metric, action, event_timestamp, received_at FROM metric_events ORDER BY received_at DESC LIMIT 10;
+SELECT clientname, metric, action, event_timestamp, received_at FROM metric_events ORDER BY event_timestamp DESC LIMIT 10;
+```
+
+`event_timestamp` and `received_at` are stored as PostgreSQL `TIMESTAMPTZ` columns. To display them explicitly in UTC from any SQL client:
+
+```sql
+SELECT
+  clientname,
+  metric,
+  action,
+  event_timestamp AT TIME ZONE 'UTC' AS event_timestamp_utc,
+  received_at AT TIME ZONE 'UTC' AS received_at_utc
+FROM metric_events
+ORDER BY event_timestamp DESC
+LIMIT 10;
 ```
 
 To inspect the database from pgAdmin, DBeaver, Power BI, or another external tool, set these values in `.env` and restart the stack:
@@ -290,4 +306,4 @@ It is best practice to lock down your firewall rules to only the below, and rout
 - Maximum messages per request: 25
 - Maximum length for `clientname`, `metric`, and `action`: 128 characters each
 - Required message fields: `clientname`, `metric`, `action`, `timestamp`
-- `timestamp` must be an ISO-8601-like string accepted by the service
+- `timestamp` must be an ISO-8601-like string accepted by the service; it is stored as a UTC `TIMESTAMPTZ` value

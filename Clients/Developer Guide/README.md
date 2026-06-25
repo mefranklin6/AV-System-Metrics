@@ -19,7 +19,7 @@ Current service limits:
 - Maximum request body size: 10 KB.
 - Maximum messages per request: 25.
 - Maximum length for `clientname`, `metric`, and `action`: 128 characters each.
-- For portability, keep `timestamp` under 64 characters because the self-hosted PostgreSQL schema stores it in a 64-character column.
+- `timestamp` must be an ISO 8601 string. UTC is recommended; the self-hosted service stores it as a PostgreSQL `TIMESTAMPTZ`.
 - Empty message lists are rejected.
 
 ## Payload Shapes
@@ -76,7 +76,7 @@ Wrapped list:
 | Field | Type | Required | Limit | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | `clientname` | string | yes | 128 chars | Unique sender identifier, such as a processor, room, device, or workstation. |
-| `timestamp` | string | yes | keep under 64 chars | ISO 8601 timestamp. UTC is recommended. |
+| `timestamp` | string | yes | ISO 8601 | UTC is recommended. The self-hosted service stores it as `TIMESTAMPTZ`. |
 | `metric` | string | yes | 128 chars | The thing being measured or tracked. |
 | `action` | string | yes | 128 chars | The event or state change. Standard client actions are `Started`, `Stopped`, and `Trace`. |
 
