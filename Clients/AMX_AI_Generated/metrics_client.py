@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 import json
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.error
 import urllib.request
 
@@ -301,7 +301,23 @@ class Metrics:
                     self._log("Server response status: {}".format(status), "info")
                     if response_body:
                         self._log(response_body, "info")
-                    self._reset_failure_state()
+
+                    ack_ok, ack_error = self._validate_server_ack(
+                        response_body,
+                        len(messages),
+                    )
+
+                    if ack_ok:
+                        self._reset_failure_state()
+                    else:
+                        self._log(
+                            "Server acknowledgement validation failed: {}. Will retry {} metrics.".format(
+                                ack_error,
+                                len(messages),
+                            ),
+                            "error",
+                        )
+                        self._record_send_failure(messages)
                 else:
                     self._handle_http_failure(status, messages, response_body)
 
@@ -372,6 +388,37 @@ class Metrics:
             ),
             "error",
         )
+
+    def _validate_server_ack(
+        self,
+        response_body: str,
+        expected_count: int,
+    ) -> Tuple[bool, str]:
+        if not response_body:
+            return False, "empty response body"
+
+        try:
+            ack = json.loads(response_body)
+        except ValueError as error:
+            return False, "invalid JSON response: {}".format(error)
+
+        if not isinstance(ack, dict):
+            return False, "response JSON was not an object"
+
+        if ack.get("ok") is not True:
+            return False, "response ok was not true"
+
+        count = ack.get("count")
+        if isinstance(count, bool) or not isinstance(count, int):
+            return False, "response count was not an integer"
+
+        if count != expected_count:
+            return False, "response count {} did not match sent count {}".format(
+                count,
+                expected_count,
+            )
+
+        return True, ""
 
     def _record_send_failure(self, messages: List[Dict[str, str]]) -> None:
         with self._lock:

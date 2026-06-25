@@ -124,6 +124,7 @@ A production client module should avoid blocking AV control logic while sending 
 - Use a timer-based fallback flush so low-volume events are eventually sent.
 - Send batches as `{"messages": [...]}` when batching is supported by the platform.
 - Keep batches at or below 25 messages. The reference client defaults to 20.
+- Validate successful responses by requiring `ok` to be `true` and `count` to match the number of messages sent.
 - Retry transient failures, including network failures, HTTP `429`, and HTTP `5xx` responses.
 - Treat HTTP `400`, `401`, `403`, `405`, and `413` responses as configuration or payload errors rather than endlessly retrying them.
 - Requeue failed transient batches ahead of newer metrics to preserve order.

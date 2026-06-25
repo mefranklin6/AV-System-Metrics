@@ -284,14 +284,31 @@ namespace AVSystemMetrics.Crestron
                 using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
                 {
                     int statusCode = (int)response.StatusCode;
+                    string responseBody = ReadResponseBody(response);
                     if (statusCode >= 200 && statusCode < 300)
                     {
                         Log("Server response status: " + statusCode, "info");
-                        ResetFailureState();
+                        if (!string.IsNullOrEmpty(responseBody))
+                        {
+                            Log(responseBody, "info");
+                        }
+
+                        string acknowledgementError;
+                        if (ValidateAcknowledgement(responseBody, messages.Count, out acknowledgementError))
+                        {
+                            ResetFailureState();
+                        }
+                        else
+                        {
+                            Log(
+                                "Server acknowledgement validation failed: " + acknowledgementError + ". Will retry " + messages.Count + " metrics.",
+                                "error");
+                            RecordSendFailure(messages);
+                        }
                     }
                     else
                     {
-                        HandleHttpFailure(statusCode, messages, ReadResponseBody(response));
+                        HandleHttpFailure(statusCode, messages, responseBody);
                     }
                 }
             }
@@ -500,6 +517,156 @@ namespace AVSystemMetrics.Crestron
             }
 
             return builder.ToString();
+        }
+
+        private static bool ValidateAcknowledgement(string responseBody, int expectedCount, out string errorMessage)
+        {
+            if (string.IsNullOrEmpty(responseBody))
+            {
+                errorMessage = "empty response body";
+                return false;
+            }
+
+            bool okValue;
+            if (!TryReadJsonBoolean(responseBody, "ok", out okValue))
+            {
+                errorMessage = "response ok was missing or not a boolean";
+                return false;
+            }
+
+            if (!okValue)
+            {
+                errorMessage = "response ok was not true";
+                return false;
+            }
+
+            int countValue;
+            if (!TryReadJsonInteger(responseBody, "count", out countValue))
+            {
+                errorMessage = "response count was missing or not an integer";
+                return false;
+            }
+
+            if (countValue != expectedCount)
+            {
+                errorMessage = "response count " + countValue + " did not match sent count " + expectedCount;
+                return false;
+            }
+
+            errorMessage = string.Empty;
+            return true;
+        }
+
+        private static bool TryReadJsonBoolean(string json, string propertyName, out bool value)
+        {
+            int valueStart;
+            value = false;
+
+            if (!TryFindJsonPropertyValue(json, propertyName, out valueStart))
+            {
+                return false;
+            }
+
+            if (StartsWithJsonLiteral(json, valueStart, "true"))
+            {
+                value = true;
+                return true;
+            }
+
+            if (StartsWithJsonLiteral(json, valueStart, "false"))
+            {
+                value = false;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryReadJsonInteger(string json, string propertyName, out int value)
+        {
+            int valueStart;
+            value = 0;
+
+            if (!TryFindJsonPropertyValue(json, propertyName, out valueStart))
+            {
+                return false;
+            }
+
+            int valueEnd = valueStart;
+            if (valueEnd < json.Length && json[valueEnd] == '-')
+            {
+                valueEnd++;
+            }
+
+            int digitStart = valueEnd;
+            while (valueEnd < json.Length && char.IsDigit(json[valueEnd]))
+            {
+                valueEnd++;
+            }
+
+            if (digitStart == valueEnd)
+            {
+                return false;
+            }
+
+            if (valueEnd < json.Length &&
+                json[valueEnd] != ',' &&
+                json[valueEnd] != '}' &&
+                !char.IsWhiteSpace(json[valueEnd]))
+            {
+                return false;
+            }
+
+            return int.TryParse(
+                json.Substring(valueStart, valueEnd - valueStart),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out value);
+        }
+
+        private static bool TryFindJsonPropertyValue(string json, string propertyName, out int valueStart)
+        {
+            string propertyToken = "\"" + propertyName + "\"";
+            int propertyIndex = json.IndexOf(propertyToken, StringComparison.Ordinal);
+            valueStart = -1;
+
+            if (propertyIndex < 0)
+            {
+                return false;
+            }
+
+            int colonIndex = json.IndexOf(':', propertyIndex + propertyToken.Length);
+            if (colonIndex < 0)
+            {
+                return false;
+            }
+
+            valueStart = colonIndex + 1;
+            while (valueStart < json.Length && char.IsWhiteSpace(json[valueStart]))
+            {
+                valueStart++;
+            }
+
+            return valueStart < json.Length;
+        }
+
+        private static bool StartsWithJsonLiteral(string json, int valueStart, string literal)
+        {
+            if (valueStart + literal.Length > json.Length)
+            {
+                return false;
+            }
+
+            if (string.Compare(json, valueStart, literal, 0, literal.Length, StringComparison.Ordinal) != 0)
+            {
+                return false;
+            }
+
+            int nextIndex = valueStart + literal.Length;
+            return nextIndex >= json.Length ||
+                json[nextIndex] == ',' ||
+                json[nextIndex] == '}' ||
+                char.IsWhiteSpace(json[nextIndex]);
         }
 
         private static string ReadResponseBody(WebResponse response)

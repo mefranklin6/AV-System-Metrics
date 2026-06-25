@@ -339,7 +339,22 @@ function Metrics:_handle_response(code, data, err, messages)
         if data ~= nil and tostring(data) ~= "" then
             self:_log(data, "info")
         end
-        self:_reset_failure_state()
+
+        local ack_ok, ack_error = self:_validate_server_ack(data, #messages)
+        if ack_ok then
+            self:_reset_failure_state()
+        else
+            self:_log(
+                string.format(
+                    "Server acknowledgement validation failed: %s. Will retry %d metrics.",
+                    tostring(ack_error),
+                    #messages
+                ),
+                "error"
+            )
+            self:_record_send_failure(messages)
+        end
+
         self:_finish_send()
         return
     end
@@ -373,6 +388,43 @@ function Metrics:_handle_response(code, data, err, messages)
     end
 
     self:_finish_send()
+end
+
+function Metrics:_validate_server_ack(data, expected_count)
+    if data == nil or tostring(data) == "" then
+        return false, "empty response body"
+    end
+
+    local decode_ok, ack, decode_error = pcall(rapidjson.decode, tostring(data))
+    if not decode_ok then
+        return false, "invalid JSON response: " .. tostring(ack)
+    end
+
+    if ack == nil then
+        return false, "invalid JSON response: " .. tostring(decode_error)
+    end
+
+    if type(ack) ~= "table" then
+        return false, "response JSON was not an object"
+    end
+
+    if ack.ok ~= true then
+        return false, "response ok was not true"
+    end
+
+    if type(ack.count) ~= "number" then
+        return false, "response count was not a number"
+    end
+
+    if ack.count ~= expected_count then
+        return false, string.format(
+            "response count %s did not match sent count %d",
+            tostring(ack.count),
+            expected_count
+        )
+    end
+
+    return true, nil
 end
 
 function Metrics:_finish_send()

@@ -238,14 +238,31 @@ class Metrics:
                     req,
                     timeout=self.request_timeout,
                 ) as response:
+                    response_body = response.read().decode("utf-8", "replace")
                     self.logger(
                         "Server response status: {}".format(response.status),
                         "info",
                     )
-                    self.logger(response.read(), "info")
+                    if response_body:
+                        self.logger(response_body, "info")
 
-                self._failed_message_count = 0
-                self._first_failure_time = None
+                    ack_ok, ack_error = self._validate_server_ack(
+                        response_body,
+                        len(messages),
+                    )
+
+                    if ack_ok:
+                        self._failed_message_count = 0
+                        self._first_failure_time = None
+                    else:
+                        self.logger(
+                            "Server acknowledgement validation failed: {}. Will retry {} metrics.".format(
+                                ack_error,
+                                len(messages),
+                            ),
+                            "error",
+                        )
+                        self._record_send_failure(messages)
 
             except urllib.error.HTTPError as e:
                 if e.code == 429:
@@ -298,6 +315,33 @@ class Metrics:
         @Wait(0)
         def _multi_thread_metric_send():
             _send_batch_inner(messages)
+
+    def _validate_server_ack(self, response_body, expected_count):
+        if not response_body:
+            return False, "empty response body"
+
+        try:
+            ack = json.loads(response_body)
+        except ValueError as error:
+            return False, "invalid JSON response: {}".format(error)
+
+        if not isinstance(ack, dict):
+            return False, "response JSON was not an object"
+
+        if ack.get("ok") is not True:
+            return False, "response ok was not true"
+
+        count = ack.get("count")
+        if isinstance(count, bool) or not isinstance(count, int):
+            return False, "response count was not an integer"
+
+        if count != expected_count:
+            return False, "response count {} did not match sent count {}".format(
+                count,
+                expected_count,
+            )
+
+        return True, ""
 
     def _record_send_failure(self, messages) -> None:
         if self._first_failure_time is None:
