@@ -38,10 +38,10 @@ There are currently two hosting systems that will support any AV controller or d
 
 ### Fully tested and validated
 
-- [Extron Control Script Python](/Clients/Extron%20ECS/metrics_client.py)
-- [Generic Python 3](/Clients/Extron%20ECS/metrics_client.py) (simply run the ECS module on a workstation)
+- [Extron Control Script Python](/Clients/Extron%20ECS/README.md)
+- [Generic Python 3](/Clients/Extron%20ECS/README.md) (simply run the ECS module on a workstation)
 
-### AI-written and not yet tested
+### AI-written and not yet tested (Testers Needed!)
 
 - [Crestron C#](/Clients/Crestron_AI_Generated/README.md)
 - [AMX MUSE Python](/Clients/AMX_AI_Generated/README.md) (Pure Python implementation tested working on a workstation)
