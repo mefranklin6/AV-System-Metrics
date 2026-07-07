@@ -54,18 +54,23 @@ curl -fsSL "${BASE_URL}/.env.example" -o .env
 
 Leave all downloaded files together in this directory. Edit `.env` with your preferred editor (such as `nano`) before starting the stack.
 
-Configuration values:
+### Required Configuration Values
 
 - `BEARER_TOKEN` - required. Make it a long random string and keep a note of it for when you setup your clients.
 - `POSTGRES_PASSWORD` - required; password for the Compose-managed PostgreSQL user. Keep this URL-Safe; Avoid characters such as `@`, `/`, `:`, `?`, `#`, `&`, and spaces
+
+### Optional Configuration Values
+
 - `EXPOSE_DATABASE` - optional; set to `true` to publish PostgreSQL for pgAdmin or similar tools. Defaults to `false`.
 - `DATABASE_HOST` - optional; host address Docker binds for PostgreSQL when `EXPOSE_DATABASE=true`. Defaults to `127.0.0.1`.
 - `DATABASE_PORT` - optional; host port Docker publishes for PostgreSQL when `EXPOSE_DATABASE=true`. Defaults to `5432`.
 - `APP_HOST` - optional; host address Docker binds for the app. Defaults to `127.0.0.1` which is for testing and reverse proxy usage. If you need to expose the service, use `0.0.0.0` but only on a trusted network.
 - `APP_PORT` - optional; host port Docker publishes for the app. Defaults to `8080`.
 - `ALLOWED_NET` - optional CIDR allow-list, for example `203.0.113.0/24`.
-- `METRICS_INGEST_IMAGE` - optional; app image to run. Defaults to `ghcr.io/mefranklin6/av-system-metrics/metrics-ingest:latest`.
+- `METRICS_INGEST_IMAGE` - optional; app image to run. Defaults to `ghcr.io/mefranklin6/av-system-metrics/metrics-ingest:main`. For stricter change control, pin this to a `sha-<commit>` tag or image digest.
 - `METRICS_INGEST_PULL_POLICY` - optional; Docker Compose pull behavior for the app image. Defaults to `always`.
+- `METRICS_INGEST_CPUS`, `METRICS_INGEST_MEMORY_LIMIT`, `METRICS_INGEST_PIDS_LIMIT` - optional runtime ceilings for the app container.
+- `POSTGRES_CPUS`, `POSTGRES_MEMORY_LIMIT`, `POSTGRES_PIDS_LIMIT` - optional runtime ceilings for the PostgreSQL container.
 
 Keep `COMPOSE_PATH_SEPARATOR` and `COMPOSE_FILE` in `.env`. Docker Compose reads `docker-compose.yml` first, then selects either `docker-compose.database-expose-false.yml` or `docker-compose.database-expose-true.yml` from the `EXPOSE_DATABASE` flag. The `false` file intentionally changes nothing. The `true` file adds the PostgreSQL host port mapping.
 
@@ -128,6 +133,7 @@ SELECT clientname, event_timestamp, metric, action FROM metric_events ORDER BY e
 ```
 
 Show recent events in PST time zone
+
 ```sql
 SELECT 
     clientname, 
@@ -138,7 +144,6 @@ FROM metric_events
 ORDER BY event_timestamp DESC 
 LIMIT 10;
 ```
-
 
 To inspect the database from pgAdmin, DBeaver, Power BI, or another external tool, set these values in `.env` and restart the stack:
 
@@ -213,6 +218,8 @@ Wrapped list:
 Note that this system uses unencrypted HTTP for transmission, due to limitations of your typical AV control processor. Anyone listening on the wire can see the full payload, including the bearer token, so you should only deploy this system **on a trusted network or behind a reverse proxy or VPN bridge**
 
 Other than the data in transit being plain text, this system follows best zero-trust least-privilege practices. The containers are minimal and hardened, the service accounts are non-root, and container network itself is restricted to admins with access to the host server.
+
+The Compose stack applies the repository-controlled parts of CIS Docker Benchmark-style hardening: explicit non-root users, dropped Linux capabilities, `no-new-privileges`, read-only root filesystems, bounded writable `tmpfs` paths, health checks, PID/memory/CPU limits, bounded JSON logs, and an internal-only database network. Note: Full CIS compliance also depends on the Docker host configurations that are not part of this project.
 
 ### Firewall Rules
 
