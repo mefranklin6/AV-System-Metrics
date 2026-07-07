@@ -3,6 +3,7 @@ import os
 import sys
 import types
 import unittest
+from unittest import mock
 
 
 class DummyDynamoResource:
@@ -22,6 +23,46 @@ def load_lambda_function():
 
 
 lambda_function = load_lambda_function()
+
+
+class ConfigTests(unittest.TestCase):
+    def test_require_secret_env_rejects_example_bearer_token(self):
+        with mock.patch.dict(
+            os.environ,
+            {"BEARER_TOKEN": "change-me-long-random-token"},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "BEARER_TOKEN must be changed"):
+                lambda_function.require_secret_env(
+                    "BEARER_TOKEN",
+                    lambda_function.EXAMPLE_BEARER_TOKENS,
+                )
+
+    def test_require_secret_env_accepts_changed_bearer_token(self):
+        with mock.patch.dict(os.environ, {"BEARER_TOKEN": "test-token"}):
+            self.assertEqual(
+                lambda_function.require_secret_env(
+                    "BEARER_TOKEN",
+                    lambda_function.EXAMPLE_BEARER_TOKENS,
+                ),
+                "test-token",
+            )
+
+    def test_require_secret_env_rejects_missing_bearer_token(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "BEARER_TOKEN is required"):
+                lambda_function.require_secret_env(
+                    "BEARER_TOKEN",
+                    lambda_function.EXAMPLE_BEARER_TOKENS,
+                )
+
+    def test_require_env_accepts_table_name(self):
+        with mock.patch.dict(os.environ, {"TABLE_NAME": "metrics"}, clear=True):
+            self.assertEqual(lambda_function.require_env("TABLE_NAME"), "metrics")
+
+    def test_require_env_rejects_missing_table_name(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "TABLE_NAME is required"):
+                lambda_function.require_env("TABLE_NAME")
 
 
 class TimestampTests(unittest.TestCase):
@@ -71,4 +112,3 @@ class TimestampTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
