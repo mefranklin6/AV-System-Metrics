@@ -22,13 +22,17 @@ This guide presumes you already have an AWS admin account setup with the appropr
   - Sort key: `sk` : string
   - Table Settings: Customize Settings
   
-  *Note, the 'best' way to setup the DB is to keep "On-demand" default settings as that benefits from true serverless architecture, but the safest way to make sure you stay within alway-free or to keep costs minimal is to set the below. Keep in mind data will be lost if your reads/writes exceed the capacity of one unit*
+  *Note: The simplest serverless option is to keep the default On-demand capacity mode, because DynamoDB scales request capacity for you. To keep cost as predictable and low as possible, you can use the 1 RCU / 1 WCU Provisioned Capacity settings below, but read the capacity note before choosing this for production.*
   - Read/write capacity settings
     - Provisioned
     - Read and Write Auto Scaling to Off
     - Read and Write Provisioned capacity units to 1
 
 ![alt text](images/image-5.png)
+
+### Provisioned Capacity and Data Loss Risk
+
+With the suggested 1 RCU / 1 WCU provisioned settings, this system can ingest roughly one sub-1 KB metric write per second across all clients. Exceeding this limit does not make DynamoDB silently lose data, but it can throttle writes or return unprocessed batch items, which the Lambda and included clients retry. Data can be lost if the retry backlog outlives a client's in-memory queue, (250 messages by default), if the client restarts or loses power before flushing, or if a permanent HTTP `4xx` configuration/payload error causes the client to drop the batch instead of retrying. If losing metrics is unacceptable, use On-demand capacity, enable DynamoDB Auto Scaling, or provision enough WCU for the total expected write rate. Relevant AWS docs: [capacity modes](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/capacity-mode.html), [provisioned capacity](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/provisioned-capacity-mode.html), [error handling](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Programming.Errors.html), and [burst/adaptive capacity](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/burst-adaptive-capacity.html).
 
 ### Create the Lambda Function
 
@@ -51,6 +55,8 @@ Leave the rest of the values at default
 `ALLOWED_NET`: Optional CIDR network notation of what client IPs are allowed to communicate with the function. It is recommended you set this to only the public IP(s) of your network. Example: 132.241.50.0/24 (covers 132.241.50.0 - 132.241.50.255). If you're using NAT and only have one public IP that all your devices communicate from, use `your_address/32`. If no address is specified any IP can call the function, but they'll still need the bearer token to perform any actions.
 
 `BEARER_TOKEN`: Generate your own random alphanumeric string. Keep this a secret. This is your client authentication and is required before the function will write anything to the database.
+
+The Lambda refuses to initialize if `BEARER_TOKEN` is left as the example value `change-me-long-random-token`.
 
 `TABLE_NAME`: The name of the database table you made earlier.
 
