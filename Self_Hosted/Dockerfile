@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM golang:latest AS build
+ARG GO_VERSION=1.26
+FROM golang:${GO_VERSION}-bookworm AS build
 
 WORKDIR /src
 
@@ -19,7 +20,8 @@ LABEL org.opencontainers.image.source="https://github.com/mefranklin6/AV-System-
 LABEL org.opencontainers.image.description="AV-System-Metrics self-hosted metrics ingest service"
 
 WORKDIR /app
-COPY --from=build /out/metrics-ingest /app/metrics-ingest
-USER nonroot:nonroot
+COPY --from=build --chown=65532:65532 --chmod=0555 /out/metrics-ingest /app/metrics-ingest
+USER 65532:65532
 EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD ["/app/metrics-ingest", "healthcheck"]
 ENTRYPOINT ["/app/metrics-ingest"]
