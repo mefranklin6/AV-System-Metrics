@@ -48,6 +48,15 @@ services:
     <<: *runtime-hardening
     image: postgres:18-alpine
     user: "999:999"
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        if [ "$${POSTGRES_PASSWORD}" = "change_me_url_safe_database_password" ]; then
+          echo "POSTGRES_PASSWORD must be changed from the .env.example value" >&2
+          exit 1
+        fi
+        exec docker-entrypoint.sh postgres
     environment:
       POSTGRES_DB: metrics
       POSTGRES_USER: metrics_user
