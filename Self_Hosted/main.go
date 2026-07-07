@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -28,6 +29,9 @@ const (
 	maxBodyBytes = int64(10_240)
 	maxFieldLen  = 128
 	maxMessages  = 25
+
+	exampleBearerToken      = "change-me-long-random-token"
+	examplePostgresPassword = "change_me_url_safe_database_password"
 
 	insertMetricSQL = `
 INSERT INTO metric_events
@@ -150,6 +154,12 @@ func loadConfig() (config, error) {
 	if cfg.databaseURL == "" {
 		return cfg, errors.New("DATABASE_URL is required")
 	}
+	if err := rejectExampleSecret("BEARER_TOKEN", cfg.bearerToken, exampleBearerToken); err != nil {
+		return cfg, err
+	}
+	if err := validateDatabaseURL(cfg.databaseURL); err != nil {
+		return cfg, err
+	}
 
 	if cidr := os.Getenv("ALLOWED_NET"); cidr != "" {
 		_, network, err := net.ParseCIDR(cidr)
@@ -160,6 +170,22 @@ func loadConfig() (config, error) {
 	}
 
 	return cfg, nil
+}
+
+func rejectExampleSecret(name, value, exampleValue string) error {
+	if value == exampleValue {
+		return fmt.Errorf("%s must be changed from the .env.example value", name)
+	}
+	return nil
+}
+
+func validateDatabaseURL(databaseURL string) error {
+	pgConfig, err := pgconn.ParseConfig(databaseURL)
+	if err != nil {
+		return fmt.Errorf("DATABASE_URL must be a valid PostgreSQL connection string: %w", err)
+	}
+
+	return rejectExampleSecret("POSTGRES_PASSWORD", pgConfig.Password, examplePostgresPassword)
 }
 
 func getenvDefault(key, fallback string) string {
