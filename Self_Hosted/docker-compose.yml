@@ -1,7 +1,23 @@
+x-runtime-hardening: &runtime-hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  privileged: false
+  init: true
+  read_only: true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   metrics-ingest:
-    image: ${METRICS_INGEST_IMAGE:-ghcr.io/mefranklin6/av-system-metrics/metrics-ingest:latest}
+    <<: *runtime-hardening
+    image: ${METRICS_INGEST_IMAGE:-ghcr.io/mefranklin6/av-system-metrics/metrics-ingest:main}
     pull_policy: ${METRICS_INGEST_PULL_POLICY:-always}
+    user: "65532:65532"
     depends_on:
       postgres:
         condition: service_healthy
@@ -12,16 +28,40 @@ services:
       ALLOWED_NET: "${ALLOWED_NET:-}"
     ports:
       - "${APP_HOST:-127.0.0.1}:${APP_PORT:-8080}:8080"
+    networks:
+      - app_net
+      - db_net
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=16m,mode=1777"
+    pids_limit: ${METRICS_INGEST_PIDS_LIMIT:-100}
+    mem_limit: ${METRICS_INGEST_MEMORY_LIMIT:-128m}
+    cpus: ${METRICS_INGEST_CPUS:-0.50}
+    healthcheck:
+      test: ["CMD", "/app/metrics-ingest", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
 
   postgres:
+    <<: *runtime-hardening
     image: postgres:18-alpine
+    user: "999:999"
     environment:
       POSTGRES_DB: metrics
       POSTGRES_USER: metrics_user
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
     volumes:
       - postgres_data:/var/lib/postgresql
+    networks:
+      - db_net
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m,mode=1777"
+      - "/var/run/postgresql:rw,noexec,nosuid,size=16m,uid=999,gid=999,mode=3775"
+    pids_limit: ${POSTGRES_PIDS_LIMIT:-200}
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-512m}
+    cpus: ${POSTGRES_CPUS:-1.00}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -32,3 +72,10 @@ services:
 
 volumes:
   postgres_data:
+
+networks:
+  app_net:
+    driver: bridge
+  db_net:
+    driver: bridge
+    internal: true
