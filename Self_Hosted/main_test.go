@@ -6,6 +6,64 @@ import (
 	"time"
 )
 
+func TestLoadConfigRejectsExampleBearerToken(t *testing.T) {
+	t.Setenv("BEARER_TOKEN", exampleBearerToken)
+	t.Setenv("DATABASE_URL", "postgres://metrics_user:real_database_password@postgres:5432/metrics?sslmode=disable")
+	t.Setenv("ALLOWED_NET", "")
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("loadConfig returned nil error, want example bearer token rejection")
+	}
+	if !strings.Contains(err.Error(), "BEARER_TOKEN must be changed") {
+		t.Fatalf("loadConfig error = %q, want BEARER_TOKEN rejection", err.Error())
+	}
+}
+
+func TestLoadConfigRejectsExamplePostgresPassword(t *testing.T) {
+	t.Setenv("BEARER_TOKEN", "real-bearer-token")
+	t.Setenv("DATABASE_URL", "postgres://metrics_user:"+examplePostgresPassword+"@postgres:5432/metrics?sslmode=disable")
+	t.Setenv("ALLOWED_NET", "")
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("loadConfig returned nil error, want example Postgres password rejection")
+	}
+	if !strings.Contains(err.Error(), "POSTGRES_PASSWORD must be changed") {
+		t.Fatalf("loadConfig error = %q, want POSTGRES_PASSWORD rejection", err.Error())
+	}
+}
+
+func TestLoadConfigAcceptsChangedSecrets(t *testing.T) {
+	t.Setenv("BEARER_TOKEN", "real-bearer-token")
+	t.Setenv("DATABASE_URL", "postgres://metrics_user:real_database_password@postgres:5432/metrics?sslmode=disable")
+	t.Setenv("ALLOWED_NET", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.bearerToken != "real-bearer-token" {
+		t.Fatalf("bearerToken = %q, want changed token", cfg.bearerToken)
+	}
+}
+
+func TestRejectExampleSecretAllowsOtherValues(t *testing.T) {
+	if err := rejectExampleSecret("BEARER_TOKEN", "real-bearer-token", exampleBearerToken); err != nil {
+		t.Fatalf("rejectExampleSecret returned error for changed value: %v", err)
+	}
+}
+
+func TestRejectExampleSecretRejectsExactExampleValue(t *testing.T) {
+	err := rejectExampleSecret("BEARER_TOKEN", exampleBearerToken, exampleBearerToken)
+	if err == nil {
+		t.Fatal("rejectExampleSecret returned nil error, want rejection")
+	}
+	if !strings.Contains(err.Error(), "BEARER_TOKEN must be changed") {
+		t.Fatalf("rejectExampleSecret error = %q, want BEARER_TOKEN rejection", err.Error())
+	}
+}
+
 func TestParseTimestampNormalizesToUTC(t *testing.T) {
 	tests := []struct {
 		name string
