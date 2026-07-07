@@ -75,6 +75,14 @@ type metricItem struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		if err := runHealthcheck(); err != nil {
+			log.Printf("healthcheck failed: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatalf("configuration error: %v", err)
@@ -160,6 +168,45 @@ func getenvDefault(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func runHealthcheck() error {
+	endpoint := os.Getenv("HEALTHCHECK_URL")
+	if endpoint == "" {
+		endpoint = healthcheckURLFromAddr(getenvDefault("ADDR", ":8080"))
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status %s from %s", resp.Status, endpoint)
+	}
+
+	return nil
+}
+
+func healthcheckURLFromAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		return "http://127.0.0.1:8080/health"
+	}
+
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+
+	return "http://" + net.JoinHostPort(host, port) + "/health"
 }
 
 func openDB(ctx context.Context, dsn string) (*sql.DB, error) {
