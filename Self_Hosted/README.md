@@ -52,12 +52,16 @@ curl -fsSL "${BASE_URL}/docker-compose.database-expose-true.yml" -o docker-compo
 curl -fsSL "${BASE_URL}/.env.example" -o .env
 ```
 
-Leave all downloaded files together in this directory. Edit `.env` with your preferred editor (such as `nano`) before starting the stack.
+Leave all downloaded files together in this directory.
+
+***Edit `.env` with your preferred editor (such as `sudo nano .env`) before starting the stack!***
 
 ### Required Configuration Values
 
 - `BEARER_TOKEN` - required. Make it a long random string and keep a note of it for when you setup your clients.
 - `POSTGRES_PASSWORD` - required; password for the Compose-managed PostgreSQL user. Keep this URL-Safe; Avoid characters such as `@`, `/`, `:`, `?`, `#`, `&`, and spaces
+
+The stack refuses to start if `BEARER_TOKEN` is still `change-me-long-random-token` or `POSTGRES_PASSWORD` is still `change_me_url_safe_database_password` from `.env.example`.
 
 ### Optional Configuration Values
 
