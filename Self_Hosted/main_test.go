@@ -70,3 +70,46 @@ func TestBuildItemUsesUTCTimestamp(t *testing.T) {
 		t.Fatalf("SortKey = %q, want UTC fixed-width timestamp prefix", item.SortKey)
 	}
 }
+
+func TestHealthcheckURLFromAddr(t *testing.T) {
+	tests := []struct {
+		name string
+		addr string
+		want string
+	}{
+		{
+			name: "default wildcard bind",
+			addr: ":8080",
+			want: "http://127.0.0.1:8080/health",
+		},
+		{
+			name: "ipv4 wildcard bind",
+			addr: "0.0.0.0:9090",
+			want: "http://127.0.0.1:9090/health",
+		},
+		{
+			name: "localhost bind",
+			addr: "127.0.0.1:8081",
+			want: "http://127.0.0.1:8081/health",
+		},
+		{
+			name: "ipv6 localhost bind",
+			addr: "[::1]:8082",
+			want: "http://[::1]:8082/health",
+		},
+		{
+			name: "invalid bind",
+			addr: "8080",
+			want: "http://127.0.0.1:8080/health",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := healthcheckURLFromAddr(tt.addr)
+			if got != tt.want {
+				t.Fatalf("healthcheckURLFromAddr(%q) = %q, want %q", tt.addr, got, tt.want)
+			}
+		})
+	}
+}
