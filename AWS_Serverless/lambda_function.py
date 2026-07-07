@@ -15,8 +15,25 @@ ALLOWED_NET_CIDR = os.environ.get("ALLOWED_NET", None)
 if ALLOWED_NET_CIDR:
     ALLOWED_NET = ipaddress.ip_network(ALLOWED_NET_CIDR)
 
-TABLE_NAME = os.environ["TABLE_NAME"]
-BEARER_TOKEN = os.environ["BEARER_TOKEN"]
+EXAMPLE_BEARER_TOKENS = {"change-me-long-random-token"}
+
+
+def require_env(name):
+    value = os.environ.get(name, "")
+    if not value:
+        raise RuntimeError(f"{name} is required")
+    return value
+
+
+def require_secret_env(name, example_values):
+    value = require_env(name)
+    if value in example_values:
+        raise RuntimeError(f"{name} must be changed from the .env.example value")
+    return value
+
+
+TABLE_NAME = require_env("TABLE_NAME")
+BEARER_TOKEN = require_secret_env("BEARER_TOKEN", EXAMPLE_BEARER_TOKENS)
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
