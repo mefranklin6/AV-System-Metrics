@@ -355,19 +355,52 @@ class Metrics:
         self._trim_cache_if_allowed()
 
     def start(self, metric_name: str) -> None:
-        """Record a 'Started' event for a metric."""
+        """Record a 'Started' event for a metric.
+
+        args:
+            metric_name (str): The name of the metric to record.
+        """
         self._cache_metric("Started", metric_name)
 
     def stop(self, metric_name: str) -> None:
-        """Record a 'Stopped' event for a metric."""
+        """Record a 'Stopped' event for a metric.
+
+        args:
+            metric_name (str): The name of the metric to record.
+        """
         self._cache_metric("Stopped", metric_name)
 
     def trace(self, metric_name: str) -> None:
-        """Record a non-timebound event, such as a button press."""
+        """Record a non-timebound event, such as a button press.
+
+        args:
+            metric_name (str): The name of the metric to record.
+        """
         self._cache_metric("Trace", metric_name)
 
+    def connected(self, metric_name: str) -> None:
+        """Record a 'Connected' event for a metric.
+
+        args:
+            metric_name (str): The name of the metric to record.
+        """
+        self._cache_metric("Connected", metric_name)
+
+    def disconnected(self, metric_name: str) -> None:
+        """Record a 'Disconnected' event for a metric.
+
+        args:
+            metric_name (str): The name of the metric to record.
+        """
+        self._cache_metric("Disconnected", metric_name)
+
     def custom(self, action: str, metric_name: str) -> None:
-        """Record a custom action."""
+        """Record a custom action.
+
+        args:
+            action (str): The custom action to record.
+            metric_name (str): The name of the metric to record.
+        """
         self._cache_metric(action, metric_name)
 
 

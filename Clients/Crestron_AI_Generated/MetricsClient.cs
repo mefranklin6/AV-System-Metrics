@@ -100,6 +100,16 @@ namespace AVSystemMetrics.Crestron
             CacheMetric("Trace", metricName);
         }
 
+        public void Connected(string metricName)
+        {
+            CacheMetric("Connected", metricName);
+        }
+
+        public void Disconnected(string metricName)
+        {
+            CacheMetric("Disconnected", metricName);
+        }
+
         public void Custom(string action, string metricName)
         {
             CacheMetric(action, metricName);

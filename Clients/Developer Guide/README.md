@@ -87,6 +87,8 @@ To match the supported client API, expose these public methods. Use the naming c
 - `start(metric_name)` - queues a message with `action` set to `Started`.
 - `stop(metric_name)` - queues a message with `action` set to `Stopped`.
 - `trace(metric_name)` - queues a message with `action` set to `Trace`.
+- `connected(metric_name)` - queues a message with `action` set to `Connected`.
+- `disconnected(metric_name)` - queues a message with `action` set to `Disconnected`.
 - `custom(action, metric_name)` - queues a message using the provided action.
 - `flush()` - sends queued messages immediately.
 
@@ -99,6 +101,8 @@ class Metrics:
     start(metric_name)
     stop(metric_name)
     trace(metric_name)
+    connected(metric_name)
+    disconnected(metric_name)
     custom(action, metric_name)
     flush()
 ```
@@ -138,6 +142,8 @@ The included Python client records messages with these action mappings:
 - `start("Display")` sends `{"metric": "Display", "action": "Started"}`.
 - `stop("Display")` sends `{"metric": "Display", "action": "Stopped"}`.
 - `trace("Button Press")` sends `{"metric": "Button Press", "action": "Trace"}`.
+- `connected("Microphone 1")` sends `{"metric": "Microphone 1", "action": "Connected"}`.
+- `disconnected("Microphone 1")` sends `{"metric": "Microphone 1", "action": "Disconnected"}`.
 - `custom("Muted", "Microphone 1")` sends `{"metric": "Microphone 1", "action": "Muted"}`.
 
 The Python client supports `aws_lambda` and `self-hosted` URI types. `aws_api_gateway` is reserved in the code but currently raises `NotImplementedError`.
@@ -145,7 +151,7 @@ The Python client supports `aws_lambda` and `self-hosted` URI types. `aws_api_ga
 For self-hosted deployments, point the URI at the `/metrics` endpoint, for example:
 
 ```text
-http://127.0.0.1:8080/metrics
+http://<host>:8080/metrics
 ```
 
 For AWS Serverless deployments, point the URI at the Lambda Function URL.

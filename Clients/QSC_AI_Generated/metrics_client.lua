@@ -472,6 +472,18 @@ end
 
 Metrics.Trace = Metrics.trace
 
+function Metrics:connected(metric_name)
+    self:_cache_metric("Connected", metric_name)
+end
+
+Metrics.Connected = Metrics.connected
+
+function Metrics:disconnected(metric_name)
+    self:_cache_metric("Disconnected", metric_name)
+end
+
+Metrics.Disconnected = Metrics.disconnected
+
 function Metrics:custom(action, metric_name)
     self:_cache_metric(action, metric_name)
 end

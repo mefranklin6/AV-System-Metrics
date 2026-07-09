@@ -104,7 +104,9 @@ class Metrics:
             raise ValueError("bearer_token can not be empty")
 
         if self.batch_size < 1 or self.batch_size > MAX_BATCH_SIZE:
-            raise ValueError("batch_size must be between 1 and {}".format(MAX_BATCH_SIZE))
+            raise ValueError(
+                "batch_size must be between 1 and {}".format(MAX_BATCH_SIZE)
+            )
 
         if self.flush_interval <= 0:
             raise ValueError("flush_interval must be greater than 0")
@@ -157,9 +159,13 @@ class Metrics:
             pass
 
     def _now_iso_utc(self) -> str:
-        return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
-            "+00:00",
-            "Z",
+        return (
+            datetime.now(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace(
+                "+00:00",
+                "Z",
+            )
         )
 
     def _can_drop_oldest_metrics_locked(self) -> bool:
@@ -451,6 +457,14 @@ class Metrics:
     def trace(self, metric_name: str) -> None:
         """Record a non-timebound event, such as a button press."""
         self._cache_metric("Trace", metric_name)
+
+    def connected(self, metric_name: str) -> None:
+        """Record a 'Connected' event for a metric."""
+        self._cache_metric("Connected", metric_name)
+
+    def disconnected(self, metric_name: str) -> None:
+        """Record a 'Disconnected' event for a metric."""
+        self._cache_metric("Disconnected", metric_name)
 
     def custom(self, action: str, metric_name: str) -> None:
         """Record a custom action."""
