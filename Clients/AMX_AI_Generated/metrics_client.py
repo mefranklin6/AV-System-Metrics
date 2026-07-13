@@ -12,7 +12,6 @@ from metrics_client import Metrics
 metrics = Metrics(
     logger=logger,
     processor_name="boardroom-muse",
-    uri_type="aws_lambda",
     uri="https://example.lambda-url.us-west-1.on.aws/",
     bearer_token="change-me-long-random-token",
 )
@@ -47,7 +46,6 @@ class Metrics:
         self,
         logger: Optional[Callable[..., None]],
         processor_name: str,
-        uri_type: str,
         uri: str,
         bearer_token: str,
         batch_size: int = 20,
@@ -59,7 +57,6 @@ class Metrics:
     ) -> None:
         self.logger = logger or MockLogger()
         self.processor_name = processor_name
-        self.uri_type = (uri_type or "").lower()
         self.uri = uri
         self.bearer_token = bearer_token
 
@@ -69,8 +66,6 @@ class Metrics:
         self.failure_drop_message_threshold = failure_drop_message_threshold
         self.failure_drop_time_threshold = failure_drop_time_threshold
         self.request_timeout = request_timeout
-
-        self.valid_uri_types = ["aws_lambda", "aws_api_gateway", "self-hosted"]
 
         self._lock = threading.RLock()
         self._metric_cache: List[Dict[str, str]] = []
@@ -85,16 +80,6 @@ class Metrics:
         self._validate_settings()
 
     def _validate_settings(self) -> None:
-        if self.uri_type not in self.valid_uri_types:
-            raise ValueError(
-                "URI type must be one of: {}".format(str(self.valid_uri_types))
-            )
-
-        if self.uri_type == "aws_api_gateway":
-            raise NotImplementedError(
-                "aws_api_gateway is not implemented yet for AV-System-Metrics"
-            )
-
         self._validate_field("processor_name", self.processor_name)
 
         if not self.uri:
@@ -490,7 +475,6 @@ if __name__ == "__main__":
     test = Metrics(
         logger=MockLogger(),
         processor_name="test_amx_muse",
-        uri_type="aws_lambda",
         uri=uri,
         bearer_token=bearer,
         flush_interval=10,

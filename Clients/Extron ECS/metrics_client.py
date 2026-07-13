@@ -13,7 +13,6 @@ from metrics_client import Metrics
 metrics = Metrics(
     logger=logger, # such as your instance of ProgramLog
     processor_name="my_processor",
-    uri_type="aws_lambda",
     uri="https://myrandomlambdainstance.lambda-url.us-west-1.on.aws/",
     bearer_token="myrandombearertoken",
 )
@@ -63,7 +62,6 @@ class Metrics:
         self,
         logger,
         processor_name: str,
-        uri_type: str,
         uri: str,
         bearer_token: str,
         batch_size: int = 20,
@@ -75,7 +73,6 @@ class Metrics:
     ) -> None:
         self.logger = logger
         self.processor_name = processor_name
-        self.uri_type = uri_type.lower()
         self.uri = uri
         self.bearer_token = bearer_token
 
@@ -85,8 +82,6 @@ class Metrics:
         self.failure_drop_message_threshold = failure_drop_message_threshold
         self.failure_drop_time_threshold = failure_drop_time_threshold
         self.request_timeout = request_timeout
-
-        self.valid_uri_types = ["aws_lambda", "aws_api_gateway", "self-hosted"]
 
         self._metric_cache = []
         self._flush_scheduled = False
@@ -98,16 +93,6 @@ class Metrics:
         self._validate_settings()
 
     def _validate_settings(self) -> None:
-        if self.uri_type not in self.valid_uri_types:
-            raise ValueError(
-                "URI Type must be one of: {}".format(str(self.valid_uri_types))
-            )
-
-        if self.uri_type == "aws_api_gateway":
-            raise NotImplementedError(
-                "aws_api_gateway is not implemented yet for AWS Serverless Metrics"
-            )
-
         if not self.bearer_token:
             raise ValueError("Bearer token can not be empty")
 
@@ -414,7 +399,6 @@ if __name__ == "__main__":
     test = Metrics(
         logger,
         "test_pc",
-        "aws_lambda",  # or 'self-hosted'
         uri,
         bearer,
         flush_interval=10,

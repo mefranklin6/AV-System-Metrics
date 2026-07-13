@@ -20,7 +20,6 @@ namespace AVSystemMetrics.Crestron
         private readonly object syncRoot = new object();
         private readonly Action<string, string> logger;
         private readonly string processorName;
-        private readonly string uriType;
         private readonly string uri;
         private readonly string bearerToken;
         private readonly int batchSize;
@@ -40,13 +39,11 @@ namespace AVSystemMetrics.Crestron
         public Metrics(
             Action<string, string> logger,
             string processorName,
-            string uriType,
             string uri,
             string bearerToken)
             : this(
                 logger,
                 processorName,
-                uriType,
                 uri,
                 bearerToken,
                 20,
@@ -60,7 +57,6 @@ namespace AVSystemMetrics.Crestron
         public Metrics(
             Action<string, string> logger,
             string processorName,
-            string uriType,
             string uri,
             string bearerToken,
             int batchSize,
@@ -71,7 +67,6 @@ namespace AVSystemMetrics.Crestron
         {
             this.logger = logger ?? NoopLogger;
             this.processorName = processorName;
-            this.uriType = (uriType ?? string.Empty).ToLowerInvariant();
             this.uri = uri;
             this.bearerToken = bearerToken;
             this.batchSize = batchSize;
@@ -161,16 +156,6 @@ namespace AVSystemMetrics.Crestron
 
         private void ValidateSettings(int flushIntervalSeconds)
         {
-            if (uriType != "aws_lambda" && uriType != "self-hosted" && uriType != "aws_api_gateway")
-            {
-                throw new ArgumentException("URI type must be one of: aws_lambda, self-hosted, aws_api_gateway");
-            }
-
-            if (uriType == "aws_api_gateway")
-            {
-                throw new NotSupportedException("aws_api_gateway is not implemented yet for AV-System-Metrics");
-            }
-
             if (string.IsNullOrEmpty(processorName))
             {
                 throw new ArgumentException("processorName can not be empty");

@@ -8,7 +8,6 @@ from a Control Script:
 
     metrics = Metrics.new({
         processor_name = "boardroom-qsys-core",
-        uri_type = "aws_lambda",
         uri = "https://example.lambda-url.us-west-1.on.aws/",
         bearer_token = "change-me-long-random-token"
     })
@@ -82,7 +81,7 @@ local function get_number(value, default_value)
     return number_value
 end
 
-function Metrics.new(logger_or_settings, processor_name, uri_type, uri, bearer_token,
+function Metrics.new(logger_or_settings, processor_name, uri, bearer_token,
                      batch_size, flush_interval, max_cache_size,
                      failure_drop_message_threshold, failure_drop_time_threshold,
                      request_timeout)
@@ -95,7 +94,6 @@ function Metrics.new(logger_or_settings, processor_name, uri_type, uri, bearer_t
         if self.processor_name == nil then
             self.processor_name = get_setting(settings, "client_name", "clientName", settings.clientname)
         end
-        self.uri_type = string.lower(tostring(get_setting(settings, "uri_type", "uriType", "")))
         self.uri = get_setting(settings, "uri", nil, nil)
         self.bearer_token = get_setting(settings, "bearer_token", "bearerToken", nil)
         self.batch_size = get_number(get_setting(settings, "batch_size", "batchSize", 20), 20)
@@ -107,7 +105,6 @@ function Metrics.new(logger_or_settings, processor_name, uri_type, uri, bearer_t
     else
         self.logger = logger_or_settings or default_logger
         self.processor_name = processor_name
-        self.uri_type = string.lower(tostring(uri_type or ""))
         self.uri = uri
         self.bearer_token = bearer_token
         self.batch_size = get_number(batch_size or 20, 20)
@@ -139,14 +136,6 @@ function Metrics:_validate_settings()
 
     if HttpClient == nil or HttpClient.Upload == nil then
         error("Q-SYS HttpClient.Upload is required")
-    end
-
-    if self.uri_type ~= "aws_lambda" and self.uri_type ~= "self-hosted" and self.uri_type ~= "aws_api_gateway" then
-        error("uri_type must be one of: aws_lambda, self-hosted, aws_api_gateway")
-    end
-
-    if self.uri_type == "aws_api_gateway" then
-        error("aws_api_gateway is not implemented yet for AV-System-Metrics")
     end
 
     if is_blank(self.processor_name) then
