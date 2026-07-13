@@ -42,7 +42,7 @@ Lambda -> Functions -> Create Function:
 - Runtime: Python (latest supported version)
 - Additional Settings
   - Check `ARM64 architecture`
-  - Check `Function URL`
+  - Check `Function URL` unless you plan to use the optional API Gateway setup below
     - Set Auth type to `NONE` (the function handles bearer-token authentication)
 
 Leave the rest of the values at default
@@ -94,12 +94,38 @@ Replace:
 
 ```
 
+### Optional: Put API Gateway in Front of Lambda
+
+A Lambda Function URL is the simplest and lowest-cost endpoint. Use an API Gateway HTTP API instead if you need features such as a custom domain, request throttling, or more detailed API monitoring. API Gateway has its own pricing, logging, and quotas, so include it in your AWS cost monitoring. See AWS's [guidance for choosing between Function URLs and API Gateway](https://docs.aws.amazon.com/lambda/latest/dg/furls-http-invoke-decision.html).
+
+This option replaces the Function URL; you do not need both. If you already created a Function URL and want API Gateway to be the only public endpoint, remove the Function URL from Lambda after the Gateway endpoint is working.
+
+1. Open **API Gateway** in the same AWS region as the Lambda function.
+2. Select **Create API**, then select **Build** under **HTTP API**. Do not choose REST API: this Lambda expects the HTTP API payload format described below.
+3. Add a Lambda integration and select the Lambda function created above.
+4. Name the API, then configure this route:
+   - Method: `POST`
+   - Resource path: `/metrics`
+   - Integration target: your Lambda function
+   - Authorization: `NONE` (the Lambda still validates the bearer token)
+5. Create a `$default` stage with automatic deployment enabled, then create the API.
+6. Open the API's integration details and confirm that **Payload format version** is `2.0`. The included Lambda reads the HTTP method and source IP from the version 2.0 request context. For details, see AWS's [HTTP API Lambda proxy integration documentation](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-lambda.html).
+7. Copy the stage's **Invoke URL** and append `/metrics`. The resulting ingest URI will look like:
+
+   ```text
+   https://<api-id>.execute-api.<region>.amazonaws.com/metrics
+   ```
+
+The API Gateway console normally adds permission for the API to invoke the Lambda function when you create the integration. If requests return an invocation-permission error, check **Lambda -> your-function -> Configuration -> Permissions -> Resource-based policy** for an `apigateway.amazonaws.com` entry.
+
+Set the client's URI to the full API Gateway `/metrics` invoke URI. The clients use the same request format for Lambda Function URLs, API Gateway, and self-hosted endpoints.
+
 ### Do a quick test in Powershell
 
 Give it a minute or two for resources to deploy and permissions to update, then, from a workstation within the allowed IP range (if specified):
 
 ```pwsh
-Invoke-RestMethod -Method POST -Uri "<your_function_uri>" `
+Invoke-RestMethod -Method POST -Uri "<your_ingest_uri>" `
 >>   -ContentType "application/json" `
 >>   -Headers @{Authorization = 'Bearer <your bearer token>'} `
 >>   -Body '{
@@ -117,6 +143,8 @@ If configured correctly, you should see:
   -- -----
 True     1
 ```
+
+For a Function URL, `<your_ingest_uri>` is the Function URL. For API Gateway, it is the full invoke URI ending in `/metrics`.
 
 ### Check your table for the test entry
 
