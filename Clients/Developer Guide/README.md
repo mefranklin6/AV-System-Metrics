@@ -8,7 +8,7 @@ The included [Extron ECS Python client](/Clients/Extron%20ECS/metrics_client.py)
 
 All metrics are sent as authenticated JSON over HTTP.
 
-- AWS Serverless: `POST` to the Lambda Function URL.
+- AWS Serverless: `POST` to the Lambda Function URL, or to the optional API Gateway HTTP API `/metrics` route.
 - Self-hosted: `POST /metrics`.
 - Required header: `Authorization: Bearer <token>`.
 - Required header: `Content-Type: application/json`.
@@ -146,7 +146,7 @@ The included Python client records messages with these action mappings:
 - `disconnected("Microphone 1")` sends `{"metric": "Microphone 1", "action": "Disconnected"}`.
 - `custom("Muted", "Microphone 1")` sends `{"metric": "Microphone 1", "action": "Muted"}`.
 
-The Python client supports `aws_lambda` and `self-hosted` URI types. `aws_api_gateway` is reserved in the code but currently raises `NotImplementedError`.
+The clients do not distinguish between hosting types. Supply the complete ingest URI for the selected deployment.
 
 For self-hosted deployments, point the URI at the `/metrics` endpoint, for example:
 
@@ -154,4 +154,4 @@ For self-hosted deployments, point the URI at the `/metrics` endpoint, for examp
 http://<host>:8080/metrics
 ```
 
-For AWS Serverless deployments, point the URI at the Lambda Function URL.
+For AWS Serverless deployments, point the URI at the Lambda Function URL or the optional API Gateway HTTP API `/metrics` invoke URI.

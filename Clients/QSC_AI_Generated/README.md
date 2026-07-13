@@ -14,13 +14,9 @@ Testing, feedback, fixes, and improvements by people who know Q-SYS are encourag
 
 - `metrics_client.lua` added to your Q-SYS design as a Lua Module named `metrics_client`.
 - A Q-SYS Control Script or Text Controller that can `require("metrics_client")`.
-- An AV-System-Metrics ingest endpoint:
-  - AWS Lambda Function URL, using `uri_type = "aws_lambda"`.
-  - Self-hosted `/metrics` endpoint, using `uri_type = "self-hosted"`.
+- An AV-System-Metrics ingest endpoint setup using a supported server or serverless configuration, as documented in the [AV-System-Metrics README](../README.md):
 - A bearer token that matches the server configuration.
 - Outbound HTTP or HTTPS access from the Q-SYS Core to the ingest endpoint.
-
-`aws_api_gateway` is listed for future compatibility but is not implemented yet.
 
 ## Basic Usage
 
@@ -32,7 +28,6 @@ metrics = Metrics.new({
         print(string.format("%s: %s", string.upper(level or "info"), tostring(message)))
     end,
     processor_name = "boardroom-qsys-core",
-    uri_type = "aws_lambda",
     uri = "https://example.lambda-url.us-west-1.on.aws/",
     bearer_token = "change-me-long-random-token"
 })
@@ -40,7 +35,7 @@ metrics = Metrics.new({
 metrics:trace("System Initialized")
 ```
 
-The settings object accepts `processor_name` or `client_name` for the value written to the `clientname` metric field. Extron-style positional construction is also supported: `Metrics.new(logger, processor_name, uri_type, uri, bearer_token)`.
+The settings object accepts `processor_name` or `client_name` for the value written to the `clientname` metric field. Positional construction is also supported: `Metrics.new(logger, processor_name, uri, bearer_token)`.
 
 Example metric calls:
 
@@ -56,7 +51,6 @@ For self-hosted deployments, include `/metrics` in the URI:
 ```lua
 metrics = Metrics.new({
     processor_name = "boardroom-qsys-core",
-    uri_type = "self-hosted",
     uri = "http://192.0.2.10:8080/metrics",
     bearer_token = "change-me-long-random-token"
 })
@@ -99,7 +93,6 @@ PascalCase aliases are also available for Q-SYS scripts that prefer them: `Trace
 ```lua
 metrics = Metrics.new({
     processor_name = "boardroom-qsys-core",
-    uri_type = "aws_lambda",
     uri = "https://example.lambda-url.us-west-1.on.aws/",
     bearer_token = "change-me-long-random-token",
     batch_size = 20,

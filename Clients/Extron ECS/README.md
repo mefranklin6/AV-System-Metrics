@@ -7,9 +7,7 @@ The same module can also run on a workstation for basic testing.
 ## Requirements
 
 - `metrics_client.py` copied into your Extron ControlScript project.
-- An AV-System-Metrics ingest endpoint:
-  - AWS Lambda Function URL, using `uri_type="aws_lambda"`.
-  - Self-hosted `/metrics` endpoint, using `uri_type="self-hosted"`.
+- An AV-System-Metrics ingest endpoint setup using a supported server or serverless configuration, as documented in the [AV-System-Metrics README](../README.md):
 - A bearer token that matches the server configuration.
 - A logger callable, such as an Extron `ProgramLog`-style function.
 
@@ -21,7 +19,6 @@ from metrics_client import Metrics
 metrics = Metrics(
     logger=logger,
     processor_name="boardroom-cp4",
-    uri_type="aws_lambda",
     uri="https://example.lambda-url.us-west-1.on.aws/",
     bearer_token="change-me-long-random-token",
 )
@@ -49,7 +46,6 @@ For self-hosted deployments, include `/metrics` in the URI:
 metrics = Metrics(
     logger=logger,
     processor_name="boardroom-cp4",
-    uri_type="self-hosted",
     uri="http://192.0.2.10:8080/metrics",
     bearer_token="change-me-long-random-token",
 )
@@ -69,7 +65,6 @@ metrics = Metrics(
 metrics = Metrics(
     logger=logger,
     processor_name="boardroom-cp4",
-    uri_type="aws_lambda",
     uri="https://example.lambda-url.us-west-1.on.aws/",
     bearer_token="change-me-long-random-token",
 )

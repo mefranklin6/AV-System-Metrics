@@ -15,13 +15,9 @@ Testing, feedback, fixes, and improvements by people who know AMX MUSE are encou
 ## Requirements
 
 - `metrics_client.py` copied into your AMX MUSE Python project.
-- An AV-System-Metrics ingest endpoint:
-  - AWS Lambda Function URL, using `uri_type="aws_lambda"`.
-  - Self-hosted `/metrics` endpoint, using `uri_type="self-hosted"`.
+- An AV-System-Metrics ingest endpoint setup using a supported server or serverless configuration, as documented in the [AV-System-Metrics README](../README.md):
 - A bearer token that matches the server configuration.
 - A logger callable that accepts `(message, level)`, or `None` to use the included console logger.
-
-`aws_api_gateway` is listed for future compatibility but is not implemented yet.
 
 ## Basic Usage
 
@@ -37,7 +33,6 @@ def log_metric_client(message, level="info"):
 metrics = Metrics(
     logger=log_metric_client,
     processor_name="boardroom-muse",
-    uri_type="aws_lambda",
     uri="https://example.lambda-url.us-west-1.on.aws/",
     bearer_token="change-me-long-random-token",
 )
@@ -60,7 +55,6 @@ For self-hosted deployments, include `/metrics` in the URI:
 metrics = Metrics(
     logger=log_metric_client,
     processor_name="boardroom-muse",
-    uri_type="self-hosted",
     uri="http://192.0.2.10:8080/metrics",
     bearer_token="change-me-long-random-token",
 )
@@ -81,7 +75,6 @@ metrics = Metrics(
 metrics = Metrics(
     logger=log_metric_client,
     processor_name="boardroom-muse",
-    uri_type="aws_lambda",
     uri="https://example.lambda-url.us-west-1.on.aws/",
     bearer_token="change-me-long-random-token",
     batch_size=20,

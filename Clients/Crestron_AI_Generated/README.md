@@ -12,13 +12,9 @@ Testing, feedback, fixes, and improvements by people who know Crestron are encou
 ## Requirements
 
 - `MetricsClient.cs` copied into your Crestron C# project.
-- An AV-System-Metrics ingest endpoint:
-  - AWS Lambda Function URL, using `uriType: "aws_lambda"`.
-  - Self-hosted `/metrics` endpoint, using `uriType: "self-hosted"`.
+- An AV-System-Metrics ingest endpoint setup using a supported server or serverless configuration, as documented in the [AV-System-Metrics README](../README.md)
 - A bearer token that matches the server configuration.
 - A logger callback such as `Action<string, string>`.
-
-`aws_api_gateway` is listed for future compatibility but is not implemented yet.
 
 ## Basic Usage
 
@@ -32,7 +28,6 @@ public void InitializeSystem()
     metrics = new Metrics(
         LogMetricClient,
         "boardroom-cp4",
-        "aws_lambda",
         "https://example.lambda-url.us-west-1.on.aws/",
         "change-me-long-random-token");
 
@@ -60,7 +55,6 @@ For self-hosted deployments, include `/metrics` in the URI:
 metrics = new Metrics(
     LogMetricClient,
     "boardroom-cp4",
-    "self-hosted",
     "http://192.0.2.10:8080/metrics",
     "change-me-long-random-token");
 ```
@@ -79,7 +73,6 @@ metrics = new Metrics(
 metrics = new Metrics(
     LogMetricClient,
     "boardroom-cp4",
-    "aws_lambda",
     "https://example.lambda-url.us-west-1.on.aws/",
     "change-me-long-random-token",
     20,
