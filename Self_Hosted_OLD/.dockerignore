@@ -1,0 +1,8 @@
+.git
+.gitignore
+.env
+.env.*
+secrets/
+*.log
+*.out
+legacy-metrics-ingest

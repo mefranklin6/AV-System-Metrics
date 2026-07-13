@@ -1,0 +1,2 @@
+# No-op override selected when EXPOSE_DATABASE=false.
+services: {}

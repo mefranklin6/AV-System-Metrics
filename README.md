@@ -34,6 +34,8 @@ There are currently two hosting systems that will support any AV controller or d
 
 - [Self-Hosted Docker Compose system using Go and PostgreSQL](/Self_Hosted/README.md)
 
+- [Deprecated self-hosted adapter for the archived Extron REST connector](/Self_Hosted_OLD/README.md)
+
 ## Supported Clients
 
 ### Fully tested and validated
