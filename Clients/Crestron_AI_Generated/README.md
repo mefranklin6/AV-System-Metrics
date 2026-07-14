@@ -43,6 +43,7 @@ private void LogMetricClient(string message, string level)
 Example metric calls:
 
 ```csharp
+metrics.Heartbeat(); // Call from a recurring timer for uptime monitoring.
 metrics.Trace("Touchpanel Button Press");
 metrics.Start("Display Power");
 metrics.Stop("Display Power");
@@ -61,6 +62,7 @@ metrics = new Metrics(
 
 ## Methods
 
+- `Heartbeat()` - records metric `Ok` with action `Heartbeat`. Call it from a recurring timer to monitor system uptime.
 - `Trace(metricName)` - records a point-in-time event with action `Trace`.
 - `Start(metricName)` - records a time bound metric start with action `Started`.
 - `Stop(metricName)` - records a time bound metric stop with action `Stopped`.

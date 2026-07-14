@@ -339,6 +339,14 @@ class Metrics:
 
         self._trim_cache_if_allowed()
 
+    def heartbeat(self, _timer=None, _count=None) -> None:
+        """Record a 'Heartbeat' event of the system.
+
+        This is to monitor uptime, so use this as a timer callback,
+        or add it to __SendHeartBeat if you use the GVE module..
+        """
+        self._cache_metric("Heartbeat", "Ok")
+
     def start(self, metric_name: str) -> None:
         """Record a 'Started' event for a metric.
 

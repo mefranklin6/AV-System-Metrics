@@ -431,6 +431,10 @@ class Metrics:
         except Exception:
             return ""
 
+    def heartbeat(self) -> None:
+        """Record a heartbeat used to monitor system uptime."""
+        self._cache_metric("Heartbeat", "Ok")
+
     def start(self, metric_name: str) -> None:
         """Record a 'Started' event for a metric."""
         self._cache_metric("Started", metric_name)

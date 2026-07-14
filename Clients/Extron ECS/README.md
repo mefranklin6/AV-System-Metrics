@@ -23,6 +23,10 @@ metrics = Metrics(
     bearer_token="change-me-long-random-token",
 )
 
+# Timer supplies the timer and count callback arguments accepted by heartbeat().
+from extronlib.system import Timer
+heartbeat_timer = Timer(60, metrics.heartbeat)
+
 # Example to track button action events
 @event
 def button_action(button, state):
@@ -53,6 +57,7 @@ metrics = Metrics(
 
 ## Methods
 
+- `heartbeat(_timer=None, _count=None)` - records metric `Ok` with action `Heartbeat` for uptime monitoring. It accepts the two arguments supplied by an `extronlib.system.Timer` callback; both are optional so it can also be called directly.
 - `trace(metric_name)` - records a point-in-time event with action `Trace`.
 - `start(metric_name)` - records a time bound metric start with action `Started`.
 - `stop(metric_name)` - records a time bound metric stop with action `Stopped`.

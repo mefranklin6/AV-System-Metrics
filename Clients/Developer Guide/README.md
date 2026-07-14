@@ -84,6 +84,7 @@ Wrapped list:
 
 To match the supported client API, expose these public methods. Use the naming conventions of your target platform if exact names are not practical, but keep a direct mapping to these actions.
 
+- `heartbeat()` - queues a message with `action` set to `Heartbeat` and `metric` set to `Ok` for uptime monitoring. It should take no arguments unless the platform's timer callback contract requires them.
 - `start(metric_name)` - queues a message with `action` set to `Started`.
 - `stop(metric_name)` - queues a message with `action` set to `Stopped`.
 - `trace(metric_name)` - queues a message with `action` set to `Trace`.
@@ -98,6 +99,7 @@ Conceptual template:
 class Metrics:
     constructor(client_name, endpoint_uri, bearer_token, options)
 
+    heartbeat()
     start(metric_name)
     stop(metric_name)
     trace(metric_name)
@@ -122,6 +124,7 @@ The module should also accept these settings during construction or initializati
 A production client module should avoid blocking AV control logic while sending telemetry.
 
 - Generate timestamps at the moment the event is recorded.
+- Expose `heartbeat` as a public method that can be scheduled on a recurring timer. Accept timer callback arguments only when required by the target platform, as in the Extron `extronlib.system.Timer` callback.
 - Prefer UTC timestamps, such as `2026-06-23T16:20:00Z` or `2026-06-23T16:20:00+00:00`.
 - Queue metrics locally instead of blocking control-system logic on every event.
 - Flush immediately when the queue reaches the configured batch size.
@@ -139,6 +142,7 @@ A production client module should avoid blocking AV control logic while sending 
 
 The included Python client records messages with these action mappings:
 
+- `heartbeat()` sends `{"metric": "Ok", "action": "Heartbeat"}`.
 - `start("Display")` sends `{"metric": "Display", "action": "Started"}`.
 - `stop("Display")` sends `{"metric": "Display", "action": "Stopped"}`.
 - `trace("Button Press")` sends `{"metric": "Button Press", "action": "Trace"}`.

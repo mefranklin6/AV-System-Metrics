@@ -449,6 +449,12 @@ end
 
 Metrics.Start = Metrics.start
 
+function Metrics:heartbeat()
+    self:_cache_metric("Heartbeat", "Ok")
+end
+
+Metrics.Heartbeat = Metrics.heartbeat
+
 function Metrics:stop(metric_name)
     self:_cache_metric("Stopped", metric_name)
 end

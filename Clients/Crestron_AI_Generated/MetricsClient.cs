@@ -85,6 +85,11 @@ namespace AVSystemMetrics.Crestron
             CacheMetric("Started", metricName);
         }
 
+        public void Heartbeat()
+        {
+            CacheMetric("Heartbeat", "Ok");
+        }
+
         public void Stop(string metricName)
         {
             CacheMetric("Stopped", metricName);

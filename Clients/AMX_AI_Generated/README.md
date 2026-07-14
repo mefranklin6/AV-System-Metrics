@@ -2,7 +2,7 @@
 
 Python client module for sending AV metric events from an AMX MUSE project to AV-System-Metrics.
 
-This initial AMX-oriented implementation uses only the Python standard library: `urllib`, `threading`, `json`, and `datetime`. It mirrors the Extron ECS client behavior with local queueing, background sends, timer-based flushing, transient retry handling, and the same `start`, `stop`, `trace`, `custom`, and `flush` API shape.
+This initial AMX-oriented implementation uses only the Python standard library: `urllib`, `threading`, `json`, and `datetime`. It mirrors the Extron ECS client behavior with local queueing, background sends, timer-based flushing, transient retry handling, and the same public metrics API.
 
 ## IMPORTANT
 
@@ -43,6 +43,7 @@ metrics.trace("System Initialized")
 Example metric calls from your MUSE callbacks or control logic:
 
 ```python
+metrics.heartbeat()  # Call from a recurring timer for uptime monitoring.
 metrics.trace("Touchpanel Button Press")
 metrics.start("Display Power")
 metrics.stop("Display Power")
@@ -62,6 +63,7 @@ metrics = Metrics(
 
 ## Methods
 
+- `heartbeat()` - records metric `Ok` with action `Heartbeat`. Call it from a recurring timer to monitor system uptime.
 - `trace(metric_name)` - records a point-in-time event with action `Trace`.
 - `start(metric_name)` - records a time bound metric start with action `Started`.
 - `stop(metric_name)` - records a time bound metric stop with action `Stopped`.

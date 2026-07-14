@@ -40,6 +40,7 @@ The settings object accepts `processor_name` or `client_name` for the value writ
 Example metric calls:
 
 ```lua
+metrics:heartbeat() -- Call from a recurring timer for uptime monitoring.
 metrics:trace("Touchpanel Button Press")
 metrics:start("Display Power")
 metrics:stop("Display Power")
@@ -80,13 +81,14 @@ Keep a reference to the metrics client for the life of the script. The examples 
 
 ## Methods
 
+- `heartbeat()` - records metric `Ok` with action `Heartbeat`. Call it from a recurring timer to monitor system uptime.
 - `trace(metric_name)` - records a point-in-time event with action `Trace`.
 - `start(metric_name)` - records a time-bound metric start with action `Started`.
 - `stop(metric_name)` - records a time-bound metric stop with action `Stopped`.
 - `custom(action, metric_name)` - records a custom action.
 - `flush()` - sends queued metrics immediately. You normally do not need to call this manually because the client automatically flushes on `flush_interval` or when the queue reaches `batch_size`.
 
-PascalCase aliases are also available for Q-SYS scripts that prefer them: `Trace`, `Start`, `Stop`, `Custom`, and `Flush`.
+PascalCase aliases are also available for Q-SYS scripts that prefer them: `Heartbeat`, `Trace`, `Start`, `Stop`, `Custom`, and `Flush`.
 
 ## Optional Settings
 

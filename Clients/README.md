@@ -14,6 +14,7 @@ See each platform folder for setup instructions and example code.
 
 Clients expose these methods:
 
+- `heartbeat()` - records metric `Ok` with action `Heartbeat` for uptime monitoring.
 - `start(metric_name)` - records `Started`.
 - `stop(metric_name)` - records `Stopped`.
 - `connected(metric_name)` - records `Connected`.
@@ -26,6 +27,7 @@ The exact case and naming of the methods follow the language they were written i
 
 ## What to Track
 
+- Call `heartbeat` from a recurring timer to confirm that the control system is running. The Extron method also accepts the timer and count arguments supplied by `extronlib.system.Timer` callbacks.
 - Add `start` and `stop` calls when turning devices on or off, including when restarting the processor.
 - Add `connected` and `disconnected` calls to device monitors that would otherwise alert you or report to a central monitoring server.
 - Add `custom` calls for state changes that need a specific action, such as `custom("Muted", "Microphone 1")`.
