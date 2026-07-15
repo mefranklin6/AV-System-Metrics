@@ -56,7 +56,7 @@ class MockLogger:
 
 
 class Metrics:
-    __version__ = "2.1.2"
+    __version__ = "2.1.3"
 
     def __init__(
         self,
@@ -70,6 +70,7 @@ class Metrics:
         failure_drop_message_threshold: int = 100,
         failure_drop_time_threshold: int = 300,
         request_timeout: float = 10.0,
+        send_heartbeat: bool = True,
     ) -> None:
         self.logger = logger
         self.processor_name = processor_name
@@ -82,6 +83,8 @@ class Metrics:
         self.failure_drop_message_threshold = failure_drop_message_threshold
         self.failure_drop_time_threshold = failure_drop_time_threshold
         self.request_timeout = request_timeout
+
+        self.send_heartbeat = send_heartbeat
 
         self._metric_cache = []
         self._flush_scheduled = False
@@ -345,7 +348,8 @@ class Metrics:
         This is to monitor uptime, so use this as a timer callback,
         or add it to __SendHeartBeat if you use the GVE module..
         """
-        self._cache_metric("Heartbeat", "Ok")
+        if self.send_heartbeat:
+            self._cache_metric("Heartbeat", "Ok")
 
     def start(self, metric_name: str) -> None:
         """Record a 'Started' event for a metric.
