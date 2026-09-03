@@ -30,7 +30,7 @@ Single message:
 
 ```json
 {
-  "clientname": "boardroom-cp4",
+  "clientname": "boardroom-S6",
   "timestamp": "2026-06-23T16:20:00Z",
   "metric": "Display 1 Power",
   "action": "Started"
@@ -42,13 +42,13 @@ List of messages:
 ```json
 [
   {
-    "clientname": "boardroom-cp4",
+    "clientname": "boardroom-S6",
     "timestamp": "2026-06-23T16:20:00Z",
     "metric": "System Power",
     "action": "Started"
   },
   {
-    "clientname": "boardroom-cp4",
+    "clientname": "boardroom-S6",
     "timestamp": "2026-06-23T16:21:05Z",
     "metric": "Source Select: HDMI 1",
     "action": "Trace"
@@ -62,7 +62,7 @@ Wrapped list:
 {
   "messages": [
     {
-      "clientname": "boardroom-cp4",
+      "clientname": "boardroom-S6",
       "timestamp": "2026-06-23T16:22:12Z",
       "metric": "Microphone 1 Mute",
       "action": "Stopped"
