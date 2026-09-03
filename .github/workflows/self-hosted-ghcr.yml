@@ -38,6 +38,9 @@ jobs:
         working-directory: ./Self_Hosted
         run: go test ./...
 
+      - name: Test self-hosted updater
+        run: bash ./Self_Hosted/update_test.sh
+
       - name: Normalize image name
         id: image
         shell: bash
