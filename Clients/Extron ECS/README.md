@@ -26,7 +26,7 @@ metrics = Metrics(
 # Example to track button action events
 @event
 def button_action(button, state):
-    metrics.trace(f"Button {button} State {state}")
+    metrics.custom(state, button)
 
 # Example to track system startup events
 def startup():
