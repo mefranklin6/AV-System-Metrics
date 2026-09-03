@@ -14,6 +14,8 @@ The same module can also run on a workstation for basic testing.
 ## Basic Usage
 
 ```python
+
+# Import and instantiate the module
 from metrics_client import Metrics
 
 metrics = Metrics(
@@ -24,7 +26,11 @@ metrics = Metrics(
 )
 
 # Example to track button action events
-@event
+
+BUTTON_EVENTS = ["Pressed", "Held", "Repeated", "Tapped"] # 'Released' omitted
+all_buttons = [btn1, btn2, btn3] # List of all your buttons
+
+@event(all_buttons, BUTTON_EVENTS)
 def button_action(button, state):
     metrics.custom(state, button)
 
