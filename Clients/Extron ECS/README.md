@@ -25,7 +25,7 @@ metrics = Metrics(
     bearer_token="change-me-long-random-token",
 )
 
-# Example to track button action events
+# Example to track all button action events
 
 BUTTON_EVENTS = ["Pressed", "Held", "Repeated", "Tapped"] # 'Released' omitted
 all_buttons = [btn1, btn2, btn3] # List of all your buttons
@@ -59,7 +59,7 @@ metrics = Metrics(
 
 ## GVE Piggybacking
 
-*If you already use GlobalView Enterprise (GVE) for device status, you can modify the GVE module to send all status updates to AV-System-Metrics.* Feel free to reach out to the author or open an issue to get information about how to configure this in your environment.
+*If you already use GlobalView Enterprise (GVE) for device status, you can modify the GVE module to send many updates to AV-System-Metrics with only minimal modification to your existing code.* Feel free to reach out to mefranklin6 or open an issue to get information about how to configure this in your environment.
 
 ## Methods
 
