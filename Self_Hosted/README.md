@@ -83,6 +83,8 @@ The stack refuses to start if `BEARER_TOKEN` is still `change-me-long-random-tok
 
 Keep `COMPOSE_PATH_SEPARATOR` and `COMPOSE_FILE` in `.env`. Docker Compose reads `docker-compose.yml` first, then selects either `docker-compose.database-expose-false.yml` or `docker-compose.database-expose-true.yml` from the `EXPOSE_DATABASE` flag. The `false` file intentionally changes nothing. The `true` file adds the PostgreSQL host port mapping.
 
+By default, the ingest service deletes records whose `action` is exactly `Heartbeat` 30 days after they were received. Set `PURGE_HEARTBEAT=false` to retain heartbeat records indefinitely, or change `HEARTBEAT_RETENTION_DAYS` to a positive whole number. Cleanup runs when the service starts and once every 24 hours; other metric records are never included.
+
 ## Start
 
 Pull and start the full stack from the directory containing `docker-compose.yml`:

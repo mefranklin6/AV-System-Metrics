@@ -1,10 +1,28 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
 )
+
+type recordingExecer struct {
+	query string
+	args  []any
+}
+
+func (e *recordingExecer) ExecContext(_ context.Context, query string, args ...any) (sql.Result, error) {
+	e.query = query
+	e.args = args
+	return fixedResult(3), nil
+}
+
+type fixedResult int64
+
+func (r fixedResult) LastInsertId() (int64, error) { return 0, nil }
+func (r fixedResult) RowsAffected() (int64, error) { return int64(r), nil }
 
 func TestLoadConfigRejectsExampleBearerToken(t *testing.T) {
 	t.Setenv("BEARER_TOKEN", exampleBearerToken)
@@ -45,6 +63,91 @@ func TestLoadConfigAcceptsChangedSecrets(t *testing.T) {
 	}
 	if cfg.bearerToken != "real-bearer-token" {
 		t.Fatalf("bearerToken = %q, want changed token", cfg.bearerToken)
+	}
+	if !cfg.purgeHeartbeat {
+		t.Fatal("purgeHeartbeat = false, want default true")
+	}
+	if cfg.heartbeatRetentionDays != 30 {
+		t.Fatalf("heartbeatRetentionDays = %d, want default 30", cfg.heartbeatRetentionDays)
+	}
+}
+
+func TestLoadConfigAppliesHeartbeatPurgeSettings(t *testing.T) {
+	t.Setenv("BEARER_TOKEN", "real-bearer-token")
+	t.Setenv("DATABASE_URL", "postgres://metrics_user:real_database_password@postgres:5432/metrics?sslmode=disable")
+	t.Setenv("ALLOWED_NET", "")
+	t.Setenv("PURGE_HEARTBEAT", "false")
+	t.Setenv("HEARTBEAT_RETENTION_DAYS", "90")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+	if cfg.purgeHeartbeat {
+		t.Fatal("purgeHeartbeat = true, want false")
+	}
+	if cfg.heartbeatRetentionDays != 90 {
+		t.Fatalf("heartbeatRetentionDays = %d, want 90", cfg.heartbeatRetentionDays)
+	}
+}
+
+func TestLoadConfigRejectsInvalidHeartbeatPurgeSettings(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+		want  string
+	}{
+		{name: "invalid toggle", key: "PURGE_HEARTBEAT", value: "sometimes", want: "PURGE_HEARTBEAT must be true or false"},
+		{name: "zero retention", key: "HEARTBEAT_RETENTION_DAYS", value: "0", want: "HEARTBEAT_RETENTION_DAYS must be a positive integer"},
+		{name: "fractional retention", key: "HEARTBEAT_RETENTION_DAYS", value: "1.5", want: "HEARTBEAT_RETENTION_DAYS must be a positive integer"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("BEARER_TOKEN", "real-bearer-token")
+			t.Setenv("DATABASE_URL", "postgres://metrics_user:real_database_password@postgres:5432/metrics?sslmode=disable")
+			t.Setenv("ALLOWED_NET", "")
+			t.Setenv("PURGE_HEARTBEAT", "true")
+			t.Setenv("HEARTBEAT_RETENTION_DAYS", "30")
+			t.Setenv(tt.key, tt.value)
+
+			_, err := loadConfig()
+			if err == nil {
+				t.Fatal("loadConfig returned nil error, want validation error")
+			}
+			if err.Error() != tt.want {
+				t.Fatalf("loadConfig error = %q, want %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestPurgeHeartbeatRecordsUsesReceivedAtCutoff(t *testing.T) {
+	db := &recordingExecer{}
+	now := time.Date(2026, time.September, 22, 15, 30, 0, 0, time.FixedZone("PDT", -7*60*60))
+
+	deleted, err := purgeHeartbeatRecords(context.Background(), db, now, 30)
+	if err != nil {
+		t.Fatalf("purgeHeartbeatRecords returned error: %v", err)
+	}
+	if deleted != 3 {
+		t.Fatalf("deleted = %d, want 3", deleted)
+	}
+	if db.query != purgeHeartbeatSQL {
+		t.Fatalf("query = %q, want purgeHeartbeatSQL", db.query)
+	}
+	if len(db.args) != 1 {
+		t.Fatalf("argument count = %d, want 1", len(db.args))
+	}
+
+	cutoff, ok := db.args[0].(time.Time)
+	if !ok {
+		t.Fatalf("cutoff type = %T, want time.Time", db.args[0])
+	}
+	want := time.Date(2026, time.August, 23, 22, 30, 0, 0, time.UTC)
+	if !cutoff.Equal(want) {
+		t.Fatalf("cutoff = %s, want %s", cutoff, want)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -26,9 +27,10 @@ import (
 )
 
 const (
-	maxBodyBytes = int64(10_240)
-	maxFieldLen  = 128
-	maxMessages  = 25
+	maxBodyBytes           = int64(10_240)
+	maxFieldLen            = 128
+	maxMessages            = 25
+	heartbeatPurgeInterval = 24 * time.Hour
 
 	exampleBearerToken      = "change-me-long-random-token"
 	examplePostgresPassword = "change_me_url_safe_database_password"
@@ -38,21 +40,28 @@ INSERT INTO metric_events
     (clientname, sort_key, event_timestamp, metric, action, event_id, received_at, source_ip)
 VALUES
     ($1, $2, $3, $4, $5, $6, $7, $8)`
+	purgeHeartbeatSQL = `DELETE FROM metric_events WHERE action = 'Heartbeat' AND received_at < $1`
 )
 
 //go:embed schema.sql
 var schemaSQL string
 
 type config struct {
-	addr        string
-	bearerToken string
-	databaseURL string
-	allowedNet  *net.IPNet
+	addr                   string
+	bearerToken            string
+	databaseURL            string
+	allowedNet             *net.IPNet
+	purgeHeartbeat         bool
+	heartbeatRetentionDays int
 }
 
 type server struct {
 	cfg config
 	db  *sql.DB
+}
+
+type execContexter interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
 type clientError struct {
@@ -100,6 +109,12 @@ func main() {
 
 	if err := applySchema(context.Background(), db); err != nil {
 		log.Fatalf("schema error: %v", err)
+	}
+
+	purgeCtx, stopHeartbeatPurge := context.WithCancel(context.Background())
+	defer stopHeartbeatPurge()
+	if cfg.purgeHeartbeat {
+		go runHeartbeatPurge(purgeCtx, db, cfg.heartbeatRetentionDays, heartbeatPurgeInterval)
 	}
 
 	srv := &server{cfg: cfg, db: db}
@@ -161,6 +176,17 @@ func loadConfig() (config, error) {
 		return cfg, err
 	}
 
+	purgeHeartbeat, err := parseBoolSetting("PURGE_HEARTBEAT", true)
+	if err != nil {
+		return cfg, err
+	}
+	heartbeatRetentionDays, err := parsePositiveIntSetting("HEARTBEAT_RETENTION_DAYS", 30)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.purgeHeartbeat = purgeHeartbeat
+	cfg.heartbeatRetentionDays = heartbeatRetentionDays
+
 	if cidr := os.Getenv("ALLOWED_NET"); cidr != "" {
 		_, network, err := net.ParseCIDR(cidr)
 		if err != nil {
@@ -170,6 +196,32 @@ func loadConfig() (config, error) {
 	}
 
 	return cfg, nil
+}
+
+func parseBoolSetting(name string, fallback bool) (bool, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false", name)
+	}
+	return parsed, nil
+}
+
+func parsePositiveIntSetting(name string, fallback int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	return parsed, nil
 }
 
 func rejectExampleSecret(name, value, exampleValue string) error {
@@ -261,6 +313,46 @@ func applySchema(ctx context.Context, db *sql.DB) error {
 
 	_, err := db.ExecContext(schemaCtx, schemaSQL)
 	return err
+}
+
+func runHeartbeatPurge(ctx context.Context, db *sql.DB, retentionDays int, interval time.Duration) {
+	purge := func() {
+		purgeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		deleted, err := purgeHeartbeatRecords(purgeCtx, db, time.Now(), retentionDays)
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Printf("heartbeat purge failed: %v", err)
+			}
+			return
+		}
+
+		log.Printf("heartbeat purge complete: deleted %d records older than %d days", deleted, retentionDays)
+	}
+
+	purge()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			purge()
+		}
+	}
+}
+
+func purgeHeartbeatRecords(ctx context.Context, db execContexter, now time.Time, retentionDays int) (int64, error) {
+	cutoff := now.UTC().AddDate(0, 0, -retentionDays)
+	result, err := db.ExecContext(ctx, purgeHeartbeatSQL, cutoff)
+	if err != nil {
+		return 0, err
+	}
+
+	return result.RowsAffected()
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {

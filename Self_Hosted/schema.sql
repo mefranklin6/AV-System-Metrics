@@ -38,3 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_metric_events_client_event_timestamp
 
 CREATE INDEX IF NOT EXISTS idx_metric_events_received_at
     ON metric_events (received_at);
+
+CREATE INDEX IF NOT EXISTS idx_metric_events_heartbeat_received_at
+    ON metric_events (received_at)
+    WHERE action = 'Heartbeat';
