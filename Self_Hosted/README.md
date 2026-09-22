@@ -35,6 +35,8 @@ The server needs the following files from this repo:
 
 - `docker-compose.yml` - defines the app and PostgreSQL services
 - `docker-compose.database-expose-false.yml` and `docker-compose.database-expose-true.yml`
+- `update.sh` - safely updates the stack and merges new configuration settings
+- `.env.example` - the configuration template used when merging updates
 - `.env` - local secrets and runtime settings
 
 Commands to create a working directory and download the stack files:
@@ -49,7 +51,10 @@ BASE_URL="https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics/${AVSM
 curl -fsSL "${BASE_URL}/docker-compose.yml" -o docker-compose.yml
 curl -fsSL "${BASE_URL}/docker-compose.database-expose-false.yml" -o docker-compose.database-expose-false.yml
 curl -fsSL "${BASE_URL}/docker-compose.database-expose-true.yml" -o docker-compose.database-expose-true.yml
-curl -fsSL "${BASE_URL}/.env.example" -o .env
+curl -fsSL "${BASE_URL}/.env.example" -o .env.example
+curl -fsSL "${BASE_URL}/update.sh" -o update.sh
+cp .env.example .env
+chmod +x update.sh
 ```
 
 Leave all downloaded files together in this directory.
@@ -88,6 +93,49 @@ docker compose up -d
 ```
 
 Once started, the services will remain running until `docker compose down` or a system shutdown. The services will restart if the host restarts.
+
+## Updating the System
+
+Run the updater from the same directory that contains the existing Compose files and `.env`:
+
+```sh
+./update.sh
+```
+
+For an installation created before `update.sh` was included, bootstrap it without replacing the existing `.env`:
+
+```sh
+curl -fsSL "https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics/main/Self_Hosted/update.sh" -o update.sh
+chmod +x update.sh
+./update.sh
+```
+
+Do not download `.env.example` over `.env`. On this first update, the script will note that it has no previous template and conservatively preserve every existing value. It installs `.env.example` as the baseline for three-way merges on later updates.
+
+The updater:
+
+- Downloads the latest Compose files, `.env.example`, and updater from the selected repository ref.
+- Performs a three-way `.env` merge using the previous template. Local values and secrets are preserved, unchanged defaults adopt new template defaults, new settings are added, and conflicting or retired settings are reported by name without printing their values.
+- Validates the merged Compose configuration before changing live files.
+- Refuses automatic PostgreSQL major-version changes.
+- Saves the previous configuration and a PostgreSQL dump under `.avsm-backups/<timestamp>/` before applying the update.
+- Pulls the configured images and recreates the services with `docker compose up -d`. The `postgres_data` named volume remains in place; the updater never runs `docker compose down -v`.
+
+Preview and validate an update without changing files, backing up the database, or restarting containers:
+
+```sh
+./update.sh --check
+```
+
+The default source for the managed stack files is the `main` branch. Use `--ref` to select another branch, tag, or commit; the container image remains controlled separately by `METRICS_INGEST_IMAGE` in `.env`:
+
+```sh
+./update.sh --ref <branch-tag-or-commit>
+```
+
+If `METRICS_INGEST_IMAGE` is pinned to a `sha-<commit>` tag or image digest, the updater installs and validates the new stack files but stops before pulling or restarting containers. Review `.env`, select the intended image, and run the updater again.
+
+By default, an update stops without changing the stack when the running PostgreSQL service cannot be backed up. `--skip-database-backup` overrides that protection and should only be used when you already have a verified backup or explicitly accept the risk.
 
 ## Testing your setup
 
