@@ -40,7 +40,7 @@ class MockLogger:
 class Metrics:
     """Client for queueing and sending AV-System-Metrics events from AMX MUSE."""
 
-    __version__ = "1.0.0"
+    __version__ = "1.0.1"
 
     def __init__(
         self,
@@ -78,6 +78,14 @@ class Metrics:
         self._first_failure_time: Optional[float] = None
 
         self._validate_settings()
+        self._log(
+            "Metrics queue is memory-only; pending metrics are lost on restart or power loss. "
+            "Flush interval: {}s; request timeout: {}s; cache target: {}; "
+            "oldest metrics may be dropped after {} failed message attempts or {}s of failures.".format(
+                self.flush_interval, self.request_timeout, self.max_cache_size,
+                self.failure_drop_message_threshold, self.failure_drop_time_threshold,
+            ), "info",
+        )
 
     def _validate_settings(self) -> None:
         self._validate_field("processor_name", self.processor_name)
@@ -183,9 +191,13 @@ class Metrics:
         del self._metric_cache[:drop_count]
 
         self._log(
-            "Dropping {} oldest cached metrics after send failures. Failed message count: {}".format(
+            "Dropping {} oldest cached metrics after send failures. "
+            "Failed message attempts: {}; failure duration: {:.1f}s; retained: {} metrics.".format(
                 drop_count,
                 self._failed_message_count,
+                (time.time() - self._first_failure_time)
+                if self._first_failure_time is not None else 0,
+                len(self._metric_cache),
             ),
             "warning",
         )
@@ -258,7 +270,11 @@ class Metrics:
             sender.daemon = True
             sender.start()
         except Exception as error:
-            self._log(error, "error")
+            self._log(
+                "Could not start metrics send: {}. Requeueing {} metrics for retry.".format(
+                    error, len(batch)
+                ), "error",
+            )
             with self._lock:
                 self._sending = False
                 self._metric_cache = batch + self._metric_cache
@@ -299,7 +315,7 @@ class Metrics:
                     )
 
                     if ack_ok:
-                        self._reset_failure_state()
+                        self._reset_failure_state(len(messages))
                     else:
                         self._log(
                             "Server acknowledgement validation failed: {}. Will retry {} metrics.".format(
@@ -320,11 +336,11 @@ class Metrics:
             )
 
         except urllib.error.URLError as error:
-            self._log(error, "error")
+            self._log("Metrics network request failed: {}".format(error), "error")
             self._record_send_failure(messages)
 
         except Exception as error:
-            self._log(error, "error")
+            self._log("Metrics send failed: {}".format(error), "error")
             self._record_send_failure(messages)
 
         finally:
@@ -419,9 +435,26 @@ class Metrics:
             self._failed_message_count += len(messages)
             self._metric_cache = messages + self._metric_cache
             self._trim_cache_if_allowed_locked()
+            self._log(
+                "Requeued {} metrics ahead of newer events; {} metrics queued after trimming. "
+                "Retry flush interval: {}s (new events may trigger an earlier attempt; "
+                "retries stop when the client is closed). "
+                "Failed message attempts: {}; failure duration: {:.1f}s.".format(
+                    len(messages), len(self._metric_cache), self.flush_interval,
+                    self._failed_message_count, time.time() - self._first_failure_time,
+                ), "warning",
+            )
 
-    def _reset_failure_state(self) -> None:
+    def _reset_failure_state(self, acknowledged_count: int) -> None:
         with self._lock:
+            if self._first_failure_time is not None:
+                self._log(
+                    "Metrics delivery recovered after {:.1f}s and {} failed message attempts. "
+                    "Acknowledged {} metrics; {} metrics remain queued.".format(
+                        time.time() - self._first_failure_time, self._failed_message_count,
+                        acknowledged_count, len(self._metric_cache),
+                    ), "info",
+                )
             self._failed_message_count = 0
             self._first_failure_time = None
 
