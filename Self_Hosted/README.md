@@ -36,6 +36,8 @@ The server needs the following files from this repo:
 - `docker-compose.yml` - defines the app and PostgreSQL services
 - `docker-compose.database-expose-false.yml` and `docker-compose.database-expose-true.yml`
 - `update.sh` - safely updates the stack and merges new configuration settings
+- `maintenance.sh` - reclaims disk space during a manually started maintenance window
+- `lifecycle-events.sh` - required support file for updates and maintenance
 - `.env.example` - the configuration template used when merging updates
 - `.env` - local secrets and runtime settings
 
@@ -53,8 +55,11 @@ curl -fsSL "${BASE_URL}/docker-compose.database-expose-false.yml" -o docker-comp
 curl -fsSL "${BASE_URL}/docker-compose.database-expose-true.yml" -o docker-compose.database-expose-true.yml
 curl -fsSL "${BASE_URL}/.env.example" -o .env.example
 curl -fsSL "${BASE_URL}/update.sh" -o update.sh
+curl -fsSL "${BASE_URL}/maintenance.sh" -o maintenance.sh
+curl -fsSL "${BASE_URL}/lifecycle-events.sh" -o lifecycle-events.sh
 cp .env.example .env
 chmod +x update.sh
+chmod +x maintenance.sh
 ```
 
 Leave all downloaded files together in this directory.
@@ -83,7 +88,7 @@ The stack refuses to start if `BEARER_TOKEN` is still `change-me-long-random-tok
 
 Keep `COMPOSE_PATH_SEPARATOR` and `COMPOSE_FILE` in `.env`. Docker Compose reads `docker-compose.yml` first, then selects either `docker-compose.database-expose-false.yml` or `docker-compose.database-expose-true.yml` from the `EXPOSE_DATABASE` flag. The `false` file intentionally changes nothing. The `true` file adds the PostgreSQL host port mapping.
 
-By default, the ingest service deletes records whose `action` is exactly `Heartbeat` 30 days after they were received. Set `PURGE_HEARTBEAT=false` to retain heartbeat records indefinitely, or change `HEARTBEAT_RETENTION_DAYS` to a positive whole number. Cleanup runs when the service starts and once every 24 hours; other metric records are never included.
+Heartbeat records are automatically deleted 30 days after receipt. Change `HEARTBEAT_RETENTION_DAYS` to adjust retention, or set `PURGE_HEARTBEAT=false` to keep them indefinitely. Cleanup runs at startup and daily; other metrics are retained. To reclaim disk space after a large cleanup, see [Maintenance](#maintenance).
 
 ## Start
 
@@ -98,29 +103,25 @@ Once started, the services will remain running until `docker compose down` or a 
 
 ## Updating the System
 
-Run the updater from the same directory that contains the existing Compose files and `.env`:
+Fetch the current updater from GitHub before each update. Run this from the server directory that contains the existing Compose files and `.env`:
 
 ```sh
-./update.sh
+AVSM_REF=main
+curl -fsSL "https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics/${AVSM_REF}/Self_Hosted/update.sh" -o update.latest.sh
+bash update.latest.sh --ref "$AVSM_REF" && rm -f update.latest.sh
 ```
 
-For an installation created before `update.sh` was included, bootstrap it without replacing the existing `.env`:
-
-```sh
-curl -fsSL "https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics/main/Self_Hosted/update.sh" -o update.sh
-chmod +x update.sh
-./update.sh
-```
+This also works for installations created before `update.sh` was included. The updater saves the previous `update.sh` with the other configuration files, then installs the current copy. If the update fails, remove `update.latest.sh` after investigating the error.
 
 Do not download `.env.example` over `.env`. On this first update, the script will note that it has no previous template and conservatively preserve every existing value. It installs `.env.example` as the baseline for three-way merges on later updates.
 
 The updater:
 
-- Downloads the latest Compose files, `.env.example`, and updater from the selected repository ref.
+- Downloads the latest Compose files, `.env.example`, updater, and maintenance command from the selected repository ref.
 - Performs a three-way `.env` merge using the previous template. Local values and secrets are preserved, unchanged defaults adopt new template defaults, new settings are added, and conflicting or retired settings are reported by name without printing their values.
 - Validates the merged Compose configuration before changing live files.
 - Refuses automatic PostgreSQL major-version changes.
-- Saves the previous configuration and a PostgreSQL dump under `.avsm-backups/<timestamp>/` before applying the update.
+- Prompts for a backup on the server or on a workstation. The workstation choice copies the previous configuration and PostgreSQL dump with SCP before applying the update.
 - Pulls the configured images and recreates the services with `docker compose up -d`. The `postgres_data` named volume remains in place; the updater never runs `docker compose down -v`.
 
 Preview and validate an update without changing files, backing up the database, or restarting containers:
@@ -135,9 +136,39 @@ The default source for the managed stack files is the `main` branch. Use `--ref`
 ./update.sh --ref <branch-tag-or-commit>
 ```
 
+For a workstation backup, the workstation must run an SSH server reachable from the AV server. Create the destination directory on the workstation first, and make sure the SSH account can write to it. At the prompt, enter a destination such as `backupuser@workstation.example:/home/backupuser/avsm-backups`. For a Windows workstation running OpenSSH Server, use a drive path such as `backupuser@workstation.example:/C:/avsm-backups`; domain accounts such as `jdoe@campus.edu@workstation.example:/C:/avsm-backups` are accepted. Paths may not contain spaces or `..`. To use a non-default SSH port or key, define a `Host` alias in the server's `~/.ssh/config` and use that alias as the host. The updater temporarily builds the backup under `.avsm-backups/` on the server, copies it to the workstation, and removes the server copy after SCP succeeds. If SCP fails, the update stops and leaves the server copy available for recovery.
+
+For an unattended update, select the destination with options:
+
+```sh
+./update.sh --backup-location workstation --workstation-destination backupuser@workstation.example:/home/backupuser/avsm-backups
+```
+
+Use `--backup-location server` for an unattended server backup. When no terminal is available and no location is selected, the updater uses the server. `--check` skips the backup prompt.
+
 If `METRICS_INGEST_IMAGE` is pinned to a `sha-<commit>` tag or image digest, the updater installs and validates the new stack files but stops before pulling or restarting containers. Review `.env`, select the intended image, and run the updater again.
 
 By default, an update stops without changing the stack when the running PostgreSQL service cannot be backed up. `--skip-database-backup` overrides that protection and should only be used when you already have a verified backup or explicitly accept the risk.
+
+## Maintenance
+
+Run maintenance to reclaim disk space after deleting a large number of heartbeats, such as after shortening retention. Routine cleanup frees space for future metrics; maintenance compacts the database to return unused space to the filesystem. It is started manually, so choose a quiet period.
+
+From the server's stack directory, check readiness and preview disk usage without downtime:
+
+```sh
+bash maintenance.sh --check
+```
+
+Heartbeat purging must be enabled and have completed successfully recently. Resolve any problems reported by the check, then run:
+
+```sh
+bash maintenance.sh
+```
+
+The command pauses ingestion, compacts stored metrics, reports space reclaimed, and restores ingestion if it was running. **Metrics generated during this window depend on client buffering and may be lost.** Database queries are also interrupted. Compaction requires spare disk space and has a default time limit of two hours; use `bash maintenance.sh --help` for options.
+
+Keep all downloaded stack files together. Maintenance requires Bash, Docker Compose v2, and `flock` (usually included with Linux). Run it separately from updates and follow any recovery instructions if it fails. Maintenance and updates record their start, stop, and outcome as trace events under `AVSM-System` in the metric history.
 
 ## Testing your setup
 
