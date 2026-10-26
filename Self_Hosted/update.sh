@@ -7,6 +7,8 @@ REPOSITORY_URL="${AVSM_REPOSITORY_URL:-https://raw.githubusercontent.com/mefrank
 AVSM_REF="${AVSM_REF:-main}"
 CHECK_ONLY=false
 SKIP_DATABASE_BACKUP=false
+BACKUP_LOCATION=""
+WORKSTATION_DESTINATION=""
 STAGE_DIR=""
 
 usage() {
@@ -19,6 +21,9 @@ Options:
   --ref REF                 Update from a branch, tag, or commit (default: main)
   --check                   Download, merge, and validate without changing anything
   --skip-database-backup    Update even when a PostgreSQL backup cannot be made
+  --backup-location PLACE   Backup on server or workstation (prompts on a terminal)
+  --workstation-destination USER@HOST:/absolute/path
+                            SCP destination directory on the workstation
   -h, --help                Show this help
 
 Environment overrides:
@@ -59,6 +64,16 @@ while (($#)); do
       SKIP_DATABASE_BACKUP=true
       shift
       ;;
+    --backup-location)
+      (($# >= 2)) || die "--backup-location requires a value"
+      BACKUP_LOCATION="$2"
+      shift 2
+      ;;
+    --workstation-destination)
+      (($# >= 2)) || die "--workstation-destination requires a value"
+      WORKSTATION_DESTINATION="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -92,6 +107,7 @@ readonly -a MANAGED_FILES=(
   docker-compose.database-expose-true.yml
   .env.example
   update.sh
+  maintenance.sh
 )
 
 printf 'Downloading self-hosted files from %s at ref %s...\n' "$REPOSITORY_URL" "$AVSM_REF"
@@ -334,6 +350,39 @@ if [[ "$CHECK_ONLY" == true ]]; then
   exit 0
 fi
 
+if [[ -z "$BACKUP_LOCATION" && -n "$WORKSTATION_DESTINATION" ]]; then
+  BACKUP_LOCATION=workstation
+fi
+
+if [[ -z "$BACKUP_LOCATION" ]]; then
+  if [[ -t 0 ]]; then
+    printf 'Where should the pre-update backup be stored?\n  1) On this server\n  2) On your workstation via SCP\n'
+    read -r -p 'Choose 1 or 2: ' backup_choice || die "could not read backup choice"
+    case "$backup_choice" in
+      1) BACKUP_LOCATION=server ;;
+      2) BACKUP_LOCATION=workstation ;;
+      *) die "choose 1 or 2 for the backup location" ;;
+    esac
+  else
+    BACKUP_LOCATION=server
+    printf 'No terminal available; using an on-server backup.\n'
+  fi
+fi
+
+case "$BACKUP_LOCATION" in
+  server)
+    [[ -z "$WORKSTATION_DESTINATION" ]] || die "--workstation-destination requires a workstation backup"
+    ;;
+  workstation)
+    command -v scp >/dev/null 2>&1 || die "scp is required for a workstation backup"
+    if [[ -z "$WORKSTATION_DESTINATION" && -t 0 ]]; then
+      read -r -p 'Workstation SCP destination (user@host:/absolute/path): ' WORKSTATION_DESTINATION || die "could not read workstation destination"
+    fi
+    [[ "$WORKSTATION_DESTINATION" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:/[A-Za-z0-9._/-]+$ && "$WORKSTATION_DESTINATION" != *..* ]] || die "workstation destination must be user@host:/absolute/path without spaces or '..'"
+    ;;
+  *) die "backup location must be server or workstation" ;;
+esac
+
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="$SCRIPT_DIR/.avsm-backups/$TIMESTAMP"
 mkdir -p "$BACKUP_DIR"
@@ -364,12 +413,24 @@ else
   warn "database backup explicitly skipped"
 fi
 
+if [[ "$BACKUP_LOCATION" == workstation ]]; then
+  printf 'Copying pre-update backup to %s...\n' "$WORKSTATION_DESTINATION"
+  if ! scp -r -- "$BACKUP_DIR" "$WORKSTATION_DESTINATION/"; then
+    die "workstation backup transfer failed; the stack was not changed and the server backup remains at $BACKUP_DIR"
+  fi
+  BACKUP_RESULT="${WORKSTATION_DESTINATION%/}/$TIMESTAMP"
+  rm -rf -- "$BACKUP_DIR"
+else
+  BACKUP_RESULT="$BACKUP_DIR"
+fi
+
 printf 'Installing the validated stack files...\n'
 for managed_file in "${MANAGED_FILES[@]}"; do
   cp -- "$STAGE_DIR/$managed_file" "$SCRIPT_DIR/$managed_file"
 done
 cp -- "$MERGED_ENV" "$SCRIPT_DIR/.env"
 chmod 755 "$SCRIPT_DIR/update.sh"
+chmod 755 "$SCRIPT_DIR/maintenance.sh"
 chmod 600 "$SCRIPT_DIR/.env"
 
 METRICS_IMAGE="$(env_value "$SCRIPT_DIR/.env" METRICS_INGEST_IMAGE)"
@@ -378,7 +439,7 @@ case "$METRICS_IMAGE" in
     warn "METRICS_INGEST_IMAGE is pinned to an immutable digest or commit tag"
     warn "stack files and .env were updated, but containers were not pulled or restarted"
     warn "review $SCRIPT_DIR/.env, select the intended image, and run this updater again"
-    printf 'Configuration backup: %s\n' "$BACKUP_DIR"
+    printf 'Configuration backup: %s\n' "$BACKUP_RESULT"
     exit 2
     ;;
 esac
@@ -391,8 +452,8 @@ if ! (
     docker compose ps
 ); then
   warn "the container update did not complete"
-  warn "previous configuration and the database backup are available at $BACKUP_DIR"
+  warn "previous configuration and the database backup are available at $BACKUP_RESULT"
   exit 1
 fi
 
-printf 'Update complete. Configuration and database backup: %s\n' "$BACKUP_DIR"
+printf 'Update complete. Configuration and database backup: %s\n' "$BACKUP_RESULT"
