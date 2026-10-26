@@ -19,7 +19,7 @@ local rapidjson = require("rapidjson")
 
 local Metrics = {}
 Metrics.__index = Metrics
-Metrics.__version__ = "2.1.2"
+Metrics.__version__ = "2.1.3"
 
 local MAX_BATCH_SIZE = 25
 
@@ -123,6 +123,13 @@ function Metrics.new(logger_or_settings, processor_name, uri, bearer_token,
 
     self:_validate_settings()
     self:_log("Metrics settings validated successfully", "info")
+    self:_log(string.format(
+        "Metrics queue is memory-only; pending metrics are lost on restart or power loss. " ..
+        "Flush interval: %gs; request timeout: %gs; cache target: %d; " ..
+        "oldest metrics may be dropped after %d failed message attempts or %gs of failures.",
+        self.flush_interval, self.request_timeout, self.max_cache_size,
+        self.failure_drop_message_threshold, self.failure_drop_time_threshold
+    ), "info")
 
     return self
 end
@@ -219,9 +226,12 @@ function Metrics:_trim_cache_if_allowed()
 
     self:_log(
         string.format(
-            "Dropping %d oldest cached metrics after send failures. Failed message count: %d",
+            "Dropping %d oldest cached metrics after send failures. " ..
+            "Failed message attempts: %d; failure duration: %.1fs; retained: %d metrics.",
             drop_count,
-            self._failed_message_count
+            self._failed_message_count,
+            self._first_failure_time ~= nil and (current_seconds() - self._first_failure_time) or 0,
+            #self._metric_cache
         ),
         "warning"
     )
@@ -314,7 +324,7 @@ function Metrics:_send_batch(messages)
     end)
 
     if not ok then
-        self:_log(upload_error, "error")
+        self:_log("Metrics upload failed: " .. tostring(upload_error), "error")
         self:_record_send_failure(messages)
         self:_finish_send()
     end
@@ -331,7 +341,7 @@ function Metrics:_handle_response(code, data, err, messages)
 
         local ack_ok, ack_error = self:_validate_server_ack(data, #messages)
         if ack_ok then
-            self:_reset_failure_state()
+            self:_reset_failure_state(#messages)
         else
             self:_log(
                 string.format(
@@ -436,9 +446,24 @@ function Metrics:_record_send_failure(messages)
     end
 
     self:_trim_cache_if_allowed()
+    self:_log(string.format(
+        "Requeued %d metrics ahead of newer events; %d metrics queued after trimming. " ..
+        "Retry flush interval: %gs (new events may trigger an earlier attempt). " ..
+        "Failed message attempts: %d; failure duration: %.1fs.",
+        #messages, #self._metric_cache, self.flush_interval,
+        self._failed_message_count, current_seconds() - self._first_failure_time
+    ), "warning")
 end
 
-function Metrics:_reset_failure_state()
+function Metrics:_reset_failure_state(acknowledged_count)
+    if self._first_failure_time ~= nil then
+        self:_log(string.format(
+            "Metrics delivery recovered after %.1fs and %d failed message attempts. " ..
+            "Acknowledged %d metrics; %d metrics remain queued.",
+            current_seconds() - self._first_failure_time, self._failed_message_count,
+            acknowledged_count, #self._metric_cache
+        ), "info")
+    end
     self._failed_message_count = 0
     self._first_failure_time = nil
 end
