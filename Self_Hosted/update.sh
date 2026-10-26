@@ -10,6 +10,10 @@ SKIP_DATABASE_BACKUP=false
 BACKUP_LOCATION=""
 WORKSTATION_DESTINATION=""
 STAGE_DIR=""
+UPDATE_STARTED=false
+UPDATE_MARKER_PENDING=false
+UPDATE_START_TIME=""
+UPDATE_OUTCOME=""
 
 usage() {
   cat <<'EOF'
@@ -24,6 +28,7 @@ Options:
   --backup-location PLACE   Backup on server or workstation (prompts on a terminal)
   --workstation-destination USER@HOST:/absolute/path
                             SCP destination directory on the workstation
+                            (Windows: USER@HOST:/C:/path)
   -h, --help                Show this help
 
 Environment overrides:
@@ -42,12 +47,32 @@ warn() {
 }
 
 cleanup() {
+  local status=$?
+  local outcome
+  trap - EXIT INT TERM HUP
+  if [[ "$UPDATE_STARTED" == true ]]; then
+    outcome="${UPDATE_OUTCOME:-$(lifecycle_outcome "$status")}"
+    if [[ "$UPDATE_MARKER_PENDING" == true ]]; then
+      if ! record_lifecycle_event 'Update started' "$UPDATE_START_TIME"; then
+        warn "could not record the update start marker in the database"
+        status=1
+      fi
+    fi
+    if ! record_lifecycle_event "Update stopped: $outcome"; then
+      warn "could not record the update stop marker in the database"
+      status=1
+    fi
+  fi
   if [[ -n "$STAGE_DIR" && "$STAGE_DIR" == "$SCRIPT_DIR"/.avsm-update.tmp.* ]]; then
     rm -rf -- "$STAGE_DIR"
   fi
+  exit "$status"
 }
 
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 while (($#)); do
   case "$1" in
@@ -108,6 +133,7 @@ readonly -a MANAGED_FILES=(
   .env.example
   update.sh
   maintenance.sh
+  lifecycle-events.sh
 )
 
 printf 'Downloading self-hosted files from %s at ref %s...\n' "$REPOSITORY_URL" "$AVSM_REF"
@@ -117,6 +143,8 @@ for managed_file in "${MANAGED_FILES[@]}"; do
     --retry 3 --output "$STAGE_DIR/$managed_file" "$download_url"
   [[ -s "$STAGE_DIR/$managed_file" ]] || die "downloaded file is empty: $managed_file"
 done
+
+source "$STAGE_DIR/lifecycle-events.sh"
 
 merge_env() {
   local base_template="$1"
@@ -376,9 +404,13 @@ case "$BACKUP_LOCATION" in
   workstation)
     command -v scp >/dev/null 2>&1 || die "scp is required for a workstation backup"
     if [[ -z "$WORKSTATION_DESTINATION" && -t 0 ]]; then
-      read -r -p 'Workstation SCP destination (user@host:/absolute/path): ' WORKSTATION_DESTINATION || die "could not read workstation destination"
+      read -r -p 'Workstation SCP destination (user@host:/absolute/path or user@host:/C:/path): ' WORKSTATION_DESTINATION || die "could not read workstation destination"
     fi
-    [[ "$WORKSTATION_DESTINATION" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:/[A-Za-z0-9._/-]+$ && "$WORKSTATION_DESTINATION" != *..* ]] || die "workstation destination must be user@host:/absolute/path without spaces or '..'"
+    # The user may contain '@' for domain accounts (scp splits at the last '@').
+    # Paths are POSIX absolute (/path) or Windows drive (/C:/path or C:/path).
+    # Set ports and keys with a Host alias in ~/.ssh/config.
+    destination_pattern='^[A-Za-z0-9._@-]+@[A-Za-z0-9._-]+:(/?[A-Za-z]:)?/[A-Za-z0-9._/-]+$'
+    [[ "$WORKSTATION_DESTINATION" =~ $destination_pattern && "$WORKSTATION_DESTINATION" != *..* ]] || die "workstation destination must be user@host:/absolute/path or user@host:/C:/path without spaces or '..'"
     ;;
   *) die "backup location must be server or workstation" ;;
 esac
@@ -424,6 +456,15 @@ else
   BACKUP_RESULT="$BACKUP_DIR"
 fi
 
+UPDATE_START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+UPDATE_STARTED=true
+if ! record_lifecycle_event 'Update started' "$UPDATE_START_TIME"; then
+  # Permit updates that recover a stopped database. Retry after the stack is
+  # healthy, preserving the original start time in event_timestamp.
+  UPDATE_MARKER_PENDING=true
+  warn "update start marker deferred until PostgreSQL is available"
+fi
+
 printf 'Installing the validated stack files...\n'
 for managed_file in "${MANAGED_FILES[@]}"; do
   cp -- "$STAGE_DIR/$managed_file" "$SCRIPT_DIR/$managed_file"
@@ -440,6 +481,7 @@ case "$METRICS_IMAGE" in
     warn "stack files and .env were updated, but containers were not pulled or restarted"
     warn "review $SCRIPT_DIR/.env, select the intended image, and run this updater again"
     printf 'Configuration backup: %s\n' "$BACKUP_RESULT"
+    UPDATE_OUTCOME='configuration updated; containers unchanged'
     exit 2
     ;;
 esac
@@ -448,7 +490,7 @@ printf 'Pulling configured container images...\n'
 if ! (
   cd "$SCRIPT_DIR" &&
     docker compose pull &&
-    docker compose up -d &&
+    docker compose up -d --wait --wait-timeout 120 &&
     docker compose ps
 ); then
   warn "the container update did not complete"
