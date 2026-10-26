@@ -56,7 +56,7 @@ class MockLogger:
 
 
 class Metrics:
-    __version__ = "2.1.3"
+    __version__ = "2.1.4"
 
     def __init__(
         self,
@@ -94,6 +94,25 @@ class Metrics:
         self._first_failure_time = None
 
         self._validate_settings()
+        self._log(
+            "Metrics queue is memory-only; pending metrics are lost on restart or power loss. "
+            "Flush interval: {}s; request timeout: {}s; cache target: {}; "
+            "oldest metrics may be dropped after {} failed message attempts or {}s of failures.".format(
+                self.flush_interval,
+                self.request_timeout,
+                self.max_cache_size,
+                self.failure_drop_message_threshold,
+                self.failure_drop_time_threshold,
+            ),
+            "info",
+        )
+
+    def _log(self, message, level="info") -> None:
+        # A logging failure must not interrupt queueing or delivery.
+        try:
+            self.logger(str(message), level)
+        except Exception:
+            pass
 
     def _validate_settings(self) -> None:
         if not self.bearer_token:
@@ -119,7 +138,7 @@ class Metrics:
         if self.request_timeout <= 0:
             raise ValueError("request_timeout must be greater than 0")
 
-        self.logger("Metrics Settings validated successfully", "info")
+        self._log("Metrics Settings validated successfully", "info")
 
     def _can_drop_oldest_metrics(self) -> bool:
         if self._failed_message_count >= self.failure_drop_message_threshold:
@@ -138,7 +157,7 @@ class Metrics:
             return
 
         if not self._can_drop_oldest_metrics():
-            self.logger(
+            self._log(
                 "Metric cache size is {}, max is {}, but dropping is not allowed yet.".format(
                     len(self._metric_cache),
                     self.max_cache_size,
@@ -149,10 +168,14 @@ class Metrics:
 
         drop_count = len(self._metric_cache) - self.max_cache_size
 
-        self.logger(
-            "Dropping {} oldest cached metrics after send failures. Failed message count: {}".format(
+        self._log(
+            "Dropping {} oldest cached metrics after send failures. "
+            "Failed message attempts: {}; failure duration: {:.1f}s; retained: {} metrics.".format(
                 drop_count,
                 self._failed_message_count,
+                (time.time() - self._first_failure_time)
+                if self._first_failure_time is not None else 0,
+                self.max_cache_size,
             ),
             "warning",
         )
@@ -202,7 +225,12 @@ class Metrics:
         try:
             self._send_batch(batch)
         except Exception as e:
-            self.logger(e, "error")
+            self._log(
+                "Could not start metrics send: {}. Requeueing {} metrics for retry.".format(
+                    e, len(batch)
+                ),
+                "error",
+            )
             self._sending = False
             self._metric_cache = batch + self._metric_cache
             self._schedule_flush()
@@ -240,10 +268,21 @@ class Metrics:
                     )
 
                     if ack_ok:
+                        if self._first_failure_time is not None:
+                            self._log(
+                                "Metrics delivery recovered after {:.1f}s and {} failed message attempts. "
+                                "Acknowledged {} metrics; {} metrics remain queued.".format(
+                                    time.time() - self._first_failure_time,
+                                    self._failed_message_count,
+                                    len(messages),
+                                    len(self._metric_cache),
+                                ),
+                                "info",
+                            )
                         self._failed_message_count = 0
                         self._first_failure_time = None
                     else:
-                        self.logger(
+                        self._log(
                             "Server acknowledgement validation failed: {}. Will retry {} metrics.".format(
                                 ack_error,
                                 len(messages),
@@ -254,7 +293,7 @@ class Metrics:
 
             except urllib.error.HTTPError as e:
                 if e.code == 429:
-                    self.logger(
+                    self._log(
                         "Server rate limited request (429). Will retry {} metrics.".format(
                             len(messages)
                         ),
@@ -263,7 +302,7 @@ class Metrics:
                     self._record_send_failure(messages)
 
                 elif 400 <= e.code < 500:
-                    self.logger(
+                    self._log(
                         "Permanent client error {}. Dropping {} metrics.".format(
                             e.code,
                             len(messages),
@@ -272,12 +311,12 @@ class Metrics:
                     )
 
                     try:
-                        self.logger(e.read(), "error")
+                        self._log(e.read(), "error")
                     except Exception:
                         pass
 
                 else:
-                    self.logger(
+                    self._log(
                         "Server error {}. Will retry {} metrics.".format(
                             e.code,
                             len(messages),
@@ -287,11 +326,11 @@ class Metrics:
                     self._record_send_failure(messages)
 
             except urllib.error.URLError as e:
-                self.logger(e, "error")
+                self._log("Metrics network request failed: {}".format(e), "error")
                 self._record_send_failure(messages)
 
             except Exception as e:
-                self.logger(e, "error")
+                self._log("Metrics send failed: {}".format(e), "error")
                 self._record_send_failure(messages)
 
             finally:
@@ -341,6 +380,19 @@ class Metrics:
         self._metric_cache = messages + self._metric_cache
 
         self._trim_cache_if_allowed()
+
+        self._log(
+            "Requeued {} metrics ahead of newer events; {} metrics queued after trimming. "
+            "Retry flush scheduled in {}s (new events may trigger an earlier attempt). "
+            "Failed message attempts: {}; failure duration: {:.1f}s.".format(
+                len(messages),
+                len(self._metric_cache),
+                self.flush_interval,
+                self._failed_message_count,
+                time.time() - self._first_failure_time,
+            ),
+            "warning",
+        )
 
     def heartbeat(self, _timer=None, _count=None) -> None:
         """Record a 'Heartbeat' event of the system.
