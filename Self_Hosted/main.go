@@ -27,10 +27,12 @@ import (
 )
 
 const (
-	maxBodyBytes           = int64(10_240)
-	maxFieldLen            = 128
-	maxMessages            = 25
-	heartbeatPurgeInterval = 24 * time.Hour
+	maxBodyBytes                = int64(10_240)
+	maxFieldLen                 = 128
+	maxMessages                 = 25
+	heartbeatPurgeInterval      = 24 * time.Hour
+	heartbeatPurgeRetryInterval = 5 * time.Minute
+	heartbeatPurgeBatchDelay    = 100 * time.Millisecond
 
 	exampleBearerToken      = "change-me-long-random-token"
 	examplePostgresPassword = "change_me_url_safe_database_password"
@@ -40,19 +42,32 @@ INSERT INTO metric_events
     (clientname, sort_key, event_timestamp, metric, action, event_id, received_at, source_ip)
 VALUES
     ($1, $2, $3, $4, $5, $6, $7, $8)`
-	purgeHeartbeatSQL = `DELETE FROM metric_events WHERE action = 'Heartbeat' AND received_at < $1`
+	// Keep ctid selection and deletion in the same statement. Each execution
+	// commits independently, preserving progress if a later batch times out.
+	purgeHeartbeatSQL = `WITH delete_batch AS (
+    SELECT ctid FROM metric_events
+    WHERE action = 'Heartbeat' AND received_at < $1
+    ORDER BY received_at
+    LIMIT $2
+    FOR UPDATE
+)
+DELETE FROM metric_events AS events
+USING delete_batch
+WHERE events.ctid = delete_batch.ctid`
 )
 
 //go:embed schema.sql
 var schemaSQL string
 
 type config struct {
-	addr                   string
-	bearerToken            string
-	databaseURL            string
-	allowedNet             *net.IPNet
-	purgeHeartbeat         bool
-	heartbeatRetentionDays int
+	addr                       string
+	bearerToken                string
+	databaseURL                string
+	allowedNet                 *net.IPNet
+	purgeHeartbeat             bool
+	heartbeatRetentionDays     int
+	heartbeatPurgeBatchSize    int
+	heartbeatPurgeBatchTimeout time.Duration
 }
 
 type server struct {
@@ -114,7 +129,7 @@ func main() {
 	purgeCtx, stopHeartbeatPurge := context.WithCancel(context.Background())
 	defer stopHeartbeatPurge()
 	if cfg.purgeHeartbeat {
-		go runHeartbeatPurge(purgeCtx, db, cfg.heartbeatRetentionDays, heartbeatPurgeInterval)
+		go runHeartbeatPurge(purgeCtx, db, cfg, heartbeatPurgeInterval, heartbeatPurgeRetryInterval)
 	}
 
 	srv := &server{cfg: cfg, db: db}
@@ -148,6 +163,7 @@ func main() {
 		}
 	case sig := <-sigCh:
 		log.Printf("received %s, shutting down", sig)
+		stopHeartbeatPurge()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(ctx); err != nil {
@@ -186,6 +202,14 @@ func loadConfig() (config, error) {
 	}
 	cfg.purgeHeartbeat = purgeHeartbeat
 	cfg.heartbeatRetentionDays = heartbeatRetentionDays
+	cfg.heartbeatPurgeBatchSize, err = parsePositiveIntSetting("HEARTBEAT_PURGE_BATCH_SIZE", 1000)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.heartbeatPurgeBatchTimeout, err = parsePositiveDurationSetting("HEARTBEAT_PURGE_BATCH_TIMEOUT", 30*time.Second)
+	if err != nil {
+		return cfg, err
+	}
 
 	if cidr := os.Getenv("ALLOWED_NET"); cidr != "" {
 		_, network, err := net.ParseCIDR(cidr)
@@ -220,6 +244,18 @@ func parsePositiveIntSetting(name string, fallback int) (int, error) {
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed <= 0 {
 		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	return parsed, nil
+}
+
+func parsePositiveDurationSetting(name string, fallback time.Duration) (time.Duration, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration (for example 30s or 2m)", name)
 	}
 	return parsed, nil
 }
@@ -315,44 +351,72 @@ func applySchema(ctx context.Context, db *sql.DB) error {
 	return err
 }
 
-func runHeartbeatPurge(ctx context.Context, db *sql.DB, retentionDays int, interval time.Duration) {
-	purge := func() {
-		purgeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-
-		deleted, err := purgeHeartbeatRecords(purgeCtx, db, time.Now(), retentionDays)
+func runHeartbeatPurge(ctx context.Context, db execContexter, cfg config, interval, retryInterval time.Duration) {
+	for ctx.Err() == nil {
+		started := time.Now()
+		log.Printf("heartbeat purge started: retention=%d days, batch_size=%d, batch_timeout=%s", cfg.heartbeatRetentionDays, cfg.heartbeatPurgeBatchSize, cfg.heartbeatPurgeBatchTimeout)
+		deleted, err := purgeHeartbeatRecords(ctx, db, started, cfg.heartbeatRetentionDays, cfg.heartbeatPurgeBatchSize, cfg.heartbeatPurgeBatchTimeout)
+		next := interval
 		if err != nil {
 			if ctx.Err() == nil {
-				log.Printf("heartbeat purge failed: %v", err)
+				log.Printf("heartbeat purge failed after deleting %d records in %s; retrying in %s: %v", deleted, time.Since(started).Round(time.Millisecond), retryInterval, err)
 			}
-			return
+			next = retryInterval
+		} else {
+			log.Printf("heartbeat purge complete: deleted %d records older than %d days in %s", deleted, cfg.heartbeatRetentionDays, time.Since(started).Round(time.Millisecond))
 		}
 
-		log.Printf("heartbeat purge complete: deleted %d records older than %d days", deleted, retentionDays)
-	}
-
-	purge()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
+		// Schedule from completion so a slow pass cannot queue another pass.
+		timer := time.NewTimer(next)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
-			purge()
+		case <-timer.C:
 		}
 	}
 }
 
-func purgeHeartbeatRecords(ctx context.Context, db execContexter, now time.Time, retentionDays int) (int64, error) {
-	cutoff := now.UTC().AddDate(0, 0, -retentionDays)
-	result, err := db.ExecContext(ctx, purgeHeartbeatSQL, cutoff)
-	if err != nil {
-		return 0, err
+func purgeHeartbeatRecords(ctx context.Context, db execContexter, now time.Time, retentionDays, batchSize int, batchTimeout time.Duration) (int64, error) {
+	if retentionDays <= 0 || batchSize <= 0 || batchTimeout <= 0 {
+		return 0, errors.New("heartbeat purge retention, batch size, and batch timeout must be positive")
 	}
+	// Fix the cutoff for this pass, even if clearing the backlog takes hours.
+	cutoff := now.UTC().AddDate(0, 0, -retentionDays)
+	var deleted int64
+	lastProgress := time.Now()
+	for {
+		if err := ctx.Err(); err != nil {
+			return deleted, err
+		}
+		batchCtx, cancel := context.WithTimeout(ctx, batchTimeout)
+		result, err := db.ExecContext(batchCtx, purgeHeartbeatSQL, cutoff, batchSize)
+		cancel()
+		if err != nil {
+			return deleted, err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return deleted, err
+		}
+		deleted += count
+		if count < int64(batchSize) {
+			return deleted, nil
+		}
+		if time.Since(lastProgress) >= time.Minute {
+			log.Printf("heartbeat purge progress: deleted %d records so far", deleted)
+			lastProgress = time.Now()
+		}
 
-	return result.RowsAffected()
+		// Yield between commits to limit pressure on ingestion and autovacuum.
+		timer := time.NewTimer(heartbeatPurgeBatchDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return deleted, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
