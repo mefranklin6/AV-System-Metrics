@@ -42,18 +42,27 @@ INSERT INTO metric_events
     (clientname, sort_key, event_timestamp, metric, action, event_id, received_at, source_ip)
 VALUES
     ($1, $2, $3, $4, $5, $6, $7, $8)`
-	// Keep ctid selection and deletion in the same statement. Each execution
-	// commits independently, preserving progress if a later batch times out.
-	purgeHeartbeatSQL = `WITH delete_batch AS (
-    SELECT ctid FROM metric_events
+	// Use id = ANY(ARRAY(...)), not a join or IN: with a parameterized LIMIT,
+	// generic plans otherwise hash-join against a full table scan per batch.
+	// Each execution commits independently, preserving progress if a later
+	// batch times out.
+	purgeHeartbeatSQL = `DELETE FROM metric_events
+WHERE id = ANY(ARRAY(
+    SELECT id FROM metric_events
     WHERE action = 'Heartbeat' AND received_at < $1
     ORDER BY received_at
     LIMIT $2
     FOR UPDATE
-)
-DELETE FROM metric_events AS events
-USING delete_batch
-WHERE events.ctid = delete_batch.ctid`
+))`
+	startHeartbeatPurgeSQL = `INSERT INTO heartbeat_purge_status
+    (id, status, started_at, cutoff, retention_days, deleted_count)
+VALUES (1, 'running', $1, $2, $3, 0)
+ON CONFLICT (id) DO UPDATE SET status = 'running', started_at = EXCLUDED.started_at,
+    finished_at = NULL, cutoff = EXCLUDED.cutoff,
+    retention_days = EXCLUDED.retention_days, deleted_count = 0`
+	finishHeartbeatPurgeSQL = `UPDATE heartbeat_purge_status
+SET status = $1, finished_at = $2, deleted_count = $3
+WHERE id = 1 AND started_at = $4`
 )
 
 //go:embed schema.sql
@@ -355,7 +364,7 @@ func runHeartbeatPurge(ctx context.Context, db execContexter, cfg config, interv
 	for ctx.Err() == nil {
 		started := time.Now()
 		log.Printf("heartbeat purge started: retention=%d days, batch_size=%d, batch_timeout=%s", cfg.heartbeatRetentionDays, cfg.heartbeatPurgeBatchSize, cfg.heartbeatPurgeBatchTimeout)
-		deleted, err := purgeHeartbeatRecords(ctx, db, started, cfg.heartbeatRetentionDays, cfg.heartbeatPurgeBatchSize, cfg.heartbeatPurgeBatchTimeout)
+		deleted, err := purgeHeartbeatPass(ctx, db, started, cfg)
 		next := interval
 		if err != nil {
 			if ctx.Err() == nil {
@@ -375,6 +384,38 @@ func runHeartbeatPurge(ctx context.Context, db execContexter, cfg config, interv
 		case <-timer.C:
 		}
 	}
+}
+
+func purgeHeartbeatPass(ctx context.Context, db execContexter, started time.Time, cfg config) (int64, error) {
+	cutoff := started.UTC().AddDate(0, 0, -cfg.heartbeatRetentionDays)
+	startCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	_, err := db.ExecContext(startCtx, startHeartbeatPurgeSQL, started, cutoff, cfg.heartbeatRetentionDays)
+	cancel()
+	if err != nil {
+		return 0, fmt.Errorf("record heartbeat purge start: %w", err)
+	}
+
+	deleted, purgeErr := purgeHeartbeatRecords(ctx, db, started, cfg.heartbeatRetentionDays, cfg.heartbeatPurgeBatchSize, cfg.heartbeatPurgeBatchTimeout)
+	status := "succeeded"
+	if purgeErr != nil {
+		status = "failed"
+	}
+	// Record cancellation during graceful shutdown too. If this write fails or
+	// the process crashes, the running state deliberately blocks maintenance.
+	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer finishCancel()
+	result, err := db.ExecContext(finishCtx, finishHeartbeatPurgeSQL, status, time.Now(), deleted, started)
+	if err == nil {
+		var affected int64
+		affected, err = result.RowsAffected()
+		if err == nil && affected != 1 {
+			err = errors.New("purge status was replaced by another attempt")
+		}
+	}
+	if err != nil {
+		return deleted, errors.Join(purgeErr, fmt.Errorf("record heartbeat purge result: %w", err))
+	}
+	return deleted, purgeErr
 }
 
 func purgeHeartbeatRecords(ctx context.Context, db execContexter, now time.Time, retentionDays, batchSize int, batchTimeout time.Duration) (int64, error) {
