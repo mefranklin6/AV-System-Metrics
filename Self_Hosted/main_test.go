@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -70,6 +72,9 @@ func TestLoadConfigAcceptsChangedSecrets(t *testing.T) {
 	if cfg.heartbeatRetentionDays != 30 {
 		t.Fatalf("heartbeatRetentionDays = %d, want default 30", cfg.heartbeatRetentionDays)
 	}
+	if cfg.heartbeatPurgeBatchSize != 1000 || cfg.heartbeatPurgeBatchTimeout != 30*time.Second {
+		t.Fatalf("unexpected purge defaults: size=%d timeout=%s", cfg.heartbeatPurgeBatchSize, cfg.heartbeatPurgeBatchTimeout)
+	}
 }
 
 func TestLoadConfigAppliesHeartbeatPurgeSettings(t *testing.T) {
@@ -78,6 +83,8 @@ func TestLoadConfigAppliesHeartbeatPurgeSettings(t *testing.T) {
 	t.Setenv("ALLOWED_NET", "")
 	t.Setenv("PURGE_HEARTBEAT", "false")
 	t.Setenv("HEARTBEAT_RETENTION_DAYS", "90")
+	t.Setenv("HEARTBEAT_PURGE_BATCH_SIZE", "250")
+	t.Setenv("HEARTBEAT_PURGE_BATCH_TIMEOUT", "2m")
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -88,6 +95,9 @@ func TestLoadConfigAppliesHeartbeatPurgeSettings(t *testing.T) {
 	}
 	if cfg.heartbeatRetentionDays != 90 {
 		t.Fatalf("heartbeatRetentionDays = %d, want 90", cfg.heartbeatRetentionDays)
+	}
+	if cfg.heartbeatPurgeBatchSize != 250 || cfg.heartbeatPurgeBatchTimeout != 2*time.Minute {
+		t.Fatalf("unexpected purge settings: size=%d timeout=%s", cfg.heartbeatPurgeBatchSize, cfg.heartbeatPurgeBatchTimeout)
 	}
 }
 
@@ -101,6 +111,12 @@ func TestLoadConfigRejectsInvalidHeartbeatPurgeSettings(t *testing.T) {
 		{name: "invalid toggle", key: "PURGE_HEARTBEAT", value: "sometimes", want: "PURGE_HEARTBEAT must be true or false"},
 		{name: "zero retention", key: "HEARTBEAT_RETENTION_DAYS", value: "0", want: "HEARTBEAT_RETENTION_DAYS must be a positive integer"},
 		{name: "fractional retention", key: "HEARTBEAT_RETENTION_DAYS", value: "1.5", want: "HEARTBEAT_RETENTION_DAYS must be a positive integer"},
+		{name: "zero batch size", key: "HEARTBEAT_PURGE_BATCH_SIZE", value: "0", want: "HEARTBEAT_PURGE_BATCH_SIZE must be a positive integer"},
+		{name: "negative batch size", key: "HEARTBEAT_PURGE_BATCH_SIZE", value: "-1", want: "HEARTBEAT_PURGE_BATCH_SIZE must be a positive integer"},
+		{name: "fractional batch size", key: "HEARTBEAT_PURGE_BATCH_SIZE", value: "1.5", want: "HEARTBEAT_PURGE_BATCH_SIZE must be a positive integer"},
+		{name: "zero timeout", key: "HEARTBEAT_PURGE_BATCH_TIMEOUT", value: "0s", want: "HEARTBEAT_PURGE_BATCH_TIMEOUT must be a positive duration (for example 30s or 2m)"},
+		{name: "negative timeout", key: "HEARTBEAT_PURGE_BATCH_TIMEOUT", value: "-1s", want: "HEARTBEAT_PURGE_BATCH_TIMEOUT must be a positive duration (for example 30s or 2m)"},
+		{name: "missing timeout unit", key: "HEARTBEAT_PURGE_BATCH_TIMEOUT", value: "30", want: "HEARTBEAT_PURGE_BATCH_TIMEOUT must be a positive duration (for example 30s or 2m)"},
 	}
 
 	for _, tt := range tests {
@@ -127,7 +143,7 @@ func TestPurgeHeartbeatRecordsUsesReceivedAtCutoff(t *testing.T) {
 	db := &recordingExecer{}
 	now := time.Date(2026, time.September, 22, 15, 30, 0, 0, time.FixedZone("PDT", -7*60*60))
 
-	deleted, err := purgeHeartbeatRecords(context.Background(), db, now, 30)
+	deleted, err := purgeHeartbeatRecords(context.Background(), db, now, 30, 1000, time.Second)
 	if err != nil {
 		t.Fatalf("purgeHeartbeatRecords returned error: %v", err)
 	}
@@ -137,8 +153,8 @@ func TestPurgeHeartbeatRecordsUsesReceivedAtCutoff(t *testing.T) {
 	if db.query != purgeHeartbeatSQL {
 		t.Fatalf("query = %q, want purgeHeartbeatSQL", db.query)
 	}
-	if len(db.args) != 1 {
-		t.Fatalf("argument count = %d, want 1", len(db.args))
+	if len(db.args) != 2 || db.args[1] != 1000 {
+		t.Fatalf("arguments = %v, want cutoff and batch size 1000", db.args)
 	}
 
 	cutoff, ok := db.args[0].(time.Time)
@@ -154,6 +170,137 @@ func TestPurgeHeartbeatRecordsUsesReceivedAtCutoff(t *testing.T) {
 func TestRejectExampleSecretAllowsOtherValues(t *testing.T) {
 	if err := rejectExampleSecret("BEARER_TOKEN", "real-bearer-token", exampleBearerToken); err != nil {
 		t.Fatalf("rejectExampleSecret returned error for changed value: %v", err)
+	}
+}
+
+type execFunc func(context.Context, string, ...any) (sql.Result, error)
+
+func (f execFunc) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return f(ctx, query, args...)
+}
+
+func TestPurgeHeartbeatRecordsCommitsMultipleBatches(t *testing.T) {
+	var calls int
+	var cutoff time.Time
+	var previousCtx context.Context
+	db := execFunc(func(ctx context.Context, query string, args ...any) (sql.Result, error) {
+		calls++
+		if previousCtx != nil && previousCtx.Err() != context.Canceled {
+			t.Fatal("previous batch context was not released")
+		}
+		previousCtx = ctx
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) <= 0 || time.Until(deadline) > time.Second {
+			t.Fatal("batch must have its own timeout")
+		}
+		if calls == 1 {
+			cutoff = args[0].(time.Time)
+		} else if !cutoff.Equal(args[0].(time.Time)) {
+			t.Fatal("cutoff changed between batches")
+		}
+		if args[1] != 2 {
+			t.Fatalf("batch size = %v, want 2", args[1])
+		}
+		if calls <= 2 {
+			return fixedResult(2), nil
+		}
+		return fixedResult(1), nil
+	})
+	deleted, err := purgeHeartbeatRecords(context.Background(), db, time.Now(), 30, 2, time.Second)
+	if err != nil || deleted != 5 || calls != 3 {
+		t.Fatalf("deleted=%d calls=%d err=%v, want 5, 3, nil", deleted, calls, err)
+	}
+}
+
+func TestPurgeHeartbeatRecordsPreservesProgressOnTimeout(t *testing.T) {
+	calls := 0
+	db := execFunc(func(ctx context.Context, _ string, _ ...any) (sql.Result, error) {
+		calls++
+		if calls == 1 {
+			return fixedResult(2), nil
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	deleted, err := purgeHeartbeatRecords(context.Background(), db, time.Now(), 30, 2, 10*time.Millisecond)
+	if deleted != 2 || !errors.Is(err, context.DeadlineExceeded) || calls != 2 {
+		t.Fatalf("deleted=%d calls=%d err=%v, want committed progress and batch timeout", deleted, calls, err)
+	}
+}
+
+func TestPurgeHeartbeatRecordsHandlesEmptyAndExactBatch(t *testing.T) {
+	for _, first := range []int64{0, 2} {
+		t.Run(strconv.FormatInt(first, 10), func(t *testing.T) {
+			calls := 0
+			db := execFunc(func(context.Context, string, ...any) (sql.Result, error) {
+				calls++
+				if calls == 1 {
+					return fixedResult(first), nil
+				}
+				return fixedResult(0), nil
+			})
+			deleted, err := purgeHeartbeatRecords(context.Background(), db, time.Now(), 30, 2, time.Second)
+			wantCalls := 1
+			if first == 2 {
+				wantCalls = 2
+			}
+			if err != nil || deleted != first || calls != wantCalls {
+				t.Fatalf("deleted=%d calls=%d err=%v", deleted, calls, err)
+			}
+		})
+	}
+}
+
+func TestPurgeHeartbeatRecordsCancellation(t *testing.T) {
+	for _, cancelDuringBatch := range []bool{false, true} {
+		t.Run(map[bool]string{false: "before first batch", true: "between batches"}[cancelDuringBatch], func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			db := execFunc(func(context.Context, string, ...any) (sql.Result, error) {
+				calls++
+				cancel()
+				return fixedResult(2), nil
+			})
+			if !cancelDuringBatch {
+				cancel()
+			}
+			deleted, err := purgeHeartbeatRecords(ctx, db, time.Now(), 30, 2, time.Second)
+			wantCalls := 0
+			if cancelDuringBatch {
+				wantCalls = 1
+			}
+			if !errors.Is(err, context.Canceled) || calls != wantCalls || deleted != int64(wantCalls*2) {
+				t.Fatalf("deleted=%d calls=%d err=%v", deleted, calls, err)
+			}
+		})
+	}
+}
+
+func TestRunHeartbeatPurgeRetriesFailures(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := make(chan struct{}, 3)
+	db := execFunc(func(context.Context, string, ...any) (sql.Result, error) {
+		calls <- struct{}{}
+		return nil, errors.New("temporary database failure")
+	})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runHeartbeatPurge(ctx, db, config{heartbeatRetentionDays: 30, heartbeatPurgeBatchSize: 1000, heartbeatPurgeBatchTimeout: time.Second}, time.Hour, 10*time.Millisecond)
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-calls:
+		case <-time.After(2 * time.Second):
+			t.Fatal("purge did not retry before the regular interval")
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("purge did not stop during retry wait")
 	}
 }
 
