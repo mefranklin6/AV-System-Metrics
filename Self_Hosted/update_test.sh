@@ -3,10 +3,10 @@
 set -Eeuo pipefail
 
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-TEST_ROOT="$(mktemp -d)"
+TEST_ROOT="$(mktemp -d "$SOURCE_DIR/.avsm-test.tmp.XXXXXX")"
 
 cleanup() {
-  if [[ -n "$TEST_ROOT" && "$TEST_ROOT" == /tmp/* ]]; then
+  if [[ -n "$TEST_ROOT" && "$TEST_ROOT" == "$SOURCE_DIR"/.avsm-test.tmp.* ]]; then
     rm -rf -- "$TEST_ROOT"
   fi
 }
@@ -21,7 +21,8 @@ for fixture_file in \
   docker-compose.yml \
   docker-compose.database-expose-false.yml \
   docker-compose.database-expose-true.yml \
-  update.sh; do
+  update.sh \
+  maintenance.sh; do
   cp -- "$SOURCE_DIR/$fixture_file" "$FIXTURE_DIR/$fixture_file"
 done
 
@@ -98,8 +99,19 @@ case "$arguments" in
 esac
 EOF
 
-chmod +x "$MOCK_BIN/curl" "$MOCK_BIN/docker"
-export FIXTURE_DIR DOCKER_LOG
+cat > "$MOCK_BIN/scp" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+[[ "$1" == -r && "$2" == -- ]]
+[[ "$4" == 'tester@workstation:/backups/' ]]
+if [[ "${SCP_FAIL:-false}" == true ]]; then
+  exit 1
+fi
+cp -r -- "$3" "$WORKSTATION_BACKUP_DIR/"
+EOF
+
+chmod +x "$MOCK_BIN/curl" "$MOCK_BIN/docker" "$MOCK_BIN/scp"
+export FIXTURE_DIR DOCKER_LOG WORKSTATION_BACKUP_DIR
 
 make_install() {
   local install_dir="$1"
@@ -146,6 +158,7 @@ grep -q 'Conflicts; local values were kept (1)' <<< "$normal_output"
 grep -q 'Settings retained for review because they left the template (1)' <<< "$normal_output"
 grep -q '^pull$' "$DOCKER_LOG"
 grep -q '^up$' "$DOCKER_LOG"
+cmp -- "$SOURCE_DIR/maintenance.sh" "$NORMAL_INSTALL/maintenance.sh"
 test -n "$(find "$NORMAL_INSTALL/.avsm-backups" -name metrics.dump -print -quit)"
 
 PINNED_INSTALL="$TEST_ROOT/pinned-install"
@@ -165,6 +178,49 @@ set -e
 
 [[ "$pinned_status" -eq 2 ]]
 grep -q 'pinned to an immutable digest or commit tag' <<< "$pinned_output"
+[[ ! -s "$DOCKER_LOG" ]]
+
+WORKSTATION_INSTALL="$TEST_ROOT/workstation-install"
+WORKSTATION_BACKUP_DIR="$TEST_ROOT/workstation-backups"
+DOCKER_LOG="$TEST_ROOT/workstation-docker.log"
+mkdir -p "$WORKSTATION_BACKUP_DIR"
+: > "$DOCKER_LOG"
+make_install "$WORKSTATION_INSTALL" 'ghcr.io/example/metrics-ingest:main'
+
+workstation_output="$(
+  PATH="$MOCK_BIN:$PATH" \
+  AVSM_REPOSITORY_URL='https://example.invalid/repository' \
+  bash "$WORKSTATION_INSTALL/update.sh" \
+    --backup-location workstation \
+    --workstation-destination 'tester@workstation:/backups' 2>&1
+)"
+
+test -n "$(find "$WORKSTATION_BACKUP_DIR" -name metrics.dump -print -quit)"
+test -n "$(find "$WORKSTATION_BACKUP_DIR" -name .env -print -quit)"
+[[ -z "$(find "$WORKSTATION_INSTALL/.avsm-backups" -mindepth 1 -print -quit)" ]]
+grep -q 'tester@workstation:/backups/' <<< "$workstation_output"
+
+FAILED_INSTALL="$TEST_ROOT/failed-install"
+DOCKER_LOG="$TEST_ROOT/failed-docker.log"
+: > "$DOCKER_LOG"
+make_install "$FAILED_INSTALL" 'ghcr.io/example/metrics-ingest:main'
+
+set +e
+failed_output="$(
+  PATH="$MOCK_BIN:$PATH" \
+  AVSM_REPOSITORY_URL='https://example.invalid/repository' \
+  SCP_FAIL=true \
+  bash "$FAILED_INSTALL/update.sh" \
+    --backup-location workstation \
+    --workstation-destination 'tester@workstation:/backups' 2>&1
+)"
+failed_status=$?
+set -e
+
+[[ "$failed_status" -ne 0 ]]
+grep -q 'workstation backup transfer failed' <<< "$failed_output"
+grep -q '^A=old-default$' "$FAILED_INSTALL/.env"
+test -n "$(find "$FAILED_INSTALL/.avsm-backups" -name metrics.dump -print -quit)"
 [[ ! -s "$DOCKER_LOG" ]]
 
 printf 'update.sh tests passed\n'
