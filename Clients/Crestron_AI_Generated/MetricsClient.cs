@@ -78,6 +78,10 @@ namespace AVSystemMetrics.Crestron
 
             ValidateSettings(flushIntervalSeconds);
             Log("Metrics settings validated successfully", "info");
+            Log("Metrics queue is memory-only; pending metrics are lost on restart or power loss. " +
+                "Flush interval: " + flushIntervalSeconds + "s; request timeout: 10s; cache target: " + maxCacheSize +
+                "; oldest metrics may be dropped after " + failureDropMessageThreshold +
+                " failed message attempts or " + failureDropTimeThresholdSeconds + "s of failures.", "info");
         }
 
         public void Start(string metricName)
@@ -296,7 +300,7 @@ namespace AVSystemMetrics.Crestron
                         string acknowledgementError;
                         if (ValidateAcknowledgement(responseBody, messages.Count, out acknowledgementError))
                         {
-                            ResetFailureState();
+                            ResetFailureState(messages.Count);
                         }
                         else
                         {
@@ -324,13 +328,13 @@ namespace AVSystemMetrics.Crestron
                 }
                 else
                 {
-                    Log(ex.Message, "error");
+                    Log("Metrics network request failed: " + ex.Message, "error");
                     RecordSendFailure(messages);
                 }
             }
             catch (Exception ex)
             {
-                Log(ex.Message, "error");
+                Log("Metrics send failed: " + ex.Message, "error");
                 RecordSendFailure(messages);
             }
             finally
@@ -391,13 +395,26 @@ namespace AVSystemMetrics.Crestron
                 failedMessageCount += messages.Count;
                 metricCache.InsertRange(0, messages);
                 TrimCacheIfAllowedLocked();
+                Log("Requeued " + messages.Count + " metrics ahead of newer events; " + metricCache.Count +
+                    " metrics queued after trimming. Retry flush interval: " + (flushIntervalMs / 1000.0) +
+                    "s (new events may trigger an earlier attempt; retries stop when the client is disposed). " +
+                    "Failed message attempts: " + failedMessageCount + "; failure duration: " +
+                    (DateTime.UtcNow - firstFailureUtc.Value).TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + "s.",
+                    "warning");
             }
         }
 
-        private void ResetFailureState()
+        private void ResetFailureState(int acknowledgedCount)
         {
             lock (syncRoot)
             {
+                if (firstFailureUtc.HasValue)
+                {
+                    Log("Metrics delivery recovered after " +
+                        (DateTime.UtcNow - firstFailureUtc.Value).TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) +
+                        "s and " + failedMessageCount + " failed message attempts. Acknowledged " + acknowledgedCount +
+                        " metrics; " + metricCache.Count + " metrics remain queued.", "info");
+                }
                 failedMessageCount = 0;
                 firstFailureUtc = null;
             }
@@ -422,7 +439,10 @@ namespace AVSystemMetrics.Crestron
             metricCache.RemoveRange(0, dropCount);
 
             Log(
-                "Dropping " + dropCount + " oldest cached metrics after send failures. Failed message count: " + failedMessageCount,
+                "Dropping " + dropCount + " oldest cached metrics after send failures. Failed message attempts: " + failedMessageCount +
+                "; failure duration: " + (firstFailureUtc.HasValue ?
+                    (DateTime.UtcNow - firstFailureUtc.Value).TotalSeconds : 0).ToString("F1", CultureInfo.InvariantCulture) +
+                "s; retained: " + metricCache.Count + " metrics.",
                 "warning");
         }
 
