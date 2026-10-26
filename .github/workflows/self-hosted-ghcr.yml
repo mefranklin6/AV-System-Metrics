@@ -44,6 +44,9 @@ jobs:
       - name: Test maintenance window
         run: bash ./Self_Hosted/maintenance_test.sh
 
+      - name: Test maintenance prerequisites with PostgreSQL
+        run: bash ./Self_Hosted/maintenance_integration_test.sh
+
       - name: Normalize image name
         id: image
         shell: bash
