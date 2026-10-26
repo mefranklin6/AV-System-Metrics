@@ -304,6 +304,80 @@ func TestRunHeartbeatPurgeRetriesFailures(t *testing.T) {
 	}
 }
 
+func TestPurgeHeartbeatPassRecordsOutcome(t *testing.T) {
+	for _, outcome := range []string{"succeeded", "failed", "canceled", "start-write-failed", "finish-write-failed"} {
+		t.Run(outcome, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			started := time.Date(2026, time.October, 26, 12, 0, 0, 0, time.UTC)
+			cfg := config{heartbeatRetentionDays: 7, heartbeatPurgeBatchSize: 2, heartbeatPurgeBatchTimeout: time.Second}
+			var queries []string
+			var finishArgs []any
+			deleteCalls := 0
+			db := execFunc(func(callCtx context.Context, query string, args ...any) (sql.Result, error) {
+				queries = append(queries, query)
+				switch query {
+				case startHeartbeatPurgeSQL:
+					if args[0] != started || args[1] != started.AddDate(0, 0, -7) || args[2] != 7 {
+						t.Fatalf("incorrect start arguments: %v", args)
+					}
+					if outcome == "start-write-failed" {
+						return nil, errors.New("status unavailable")
+					}
+				case purgeHeartbeatSQL:
+					deleteCalls++
+					if outcome == "failed" {
+						if deleteCalls == 1 {
+							return fixedResult(2), nil
+						}
+						return nil, errors.New("delete failed")
+					}
+					if outcome == "canceled" {
+						cancel()
+						return nil, context.Canceled
+					}
+				case finishHeartbeatPurgeSQL:
+					if callCtx.Err() != nil {
+						t.Fatal("result recording must survive purge cancellation")
+					}
+					finishArgs = args
+					if outcome == "finish-write-failed" {
+						return nil, errors.New("status unavailable")
+					}
+				default:
+					t.Fatalf("unexpected query: %s", query)
+				}
+				return fixedResult(1), nil
+			})
+			deleted, err := purgeHeartbeatPass(ctx, db, started, cfg)
+			if outcome == "start-write-failed" {
+				if err == nil || len(queries) != 1 || deleted != 0 {
+					t.Fatalf("purge continued after status start failed: queries=%d deleted=%d err=%v", len(queries), deleted, err)
+				}
+				return
+			}
+			if len(finishArgs) != 4 || queries[len(queries)-1] != finishHeartbeatPurgeSQL || finishArgs[3] != started {
+				t.Fatalf("missing result recording: %v", finishArgs)
+			}
+			wantStatus := "succeeded"
+			wantDeleted := int64(1)
+			if outcome == "failed" || outcome == "canceled" {
+				wantStatus = "failed"
+				wantDeleted = 2
+				if outcome == "canceled" {
+					wantDeleted = 0
+				}
+			}
+			if finishArgs[0] != wantStatus || finishArgs[2] != wantDeleted || deleted != wantDeleted {
+				t.Fatalf("incorrect result: args=%v deleted=%d", finishArgs, deleted)
+			}
+			if (err == nil) != (outcome == "succeeded") {
+				t.Fatalf("outcome=%s err=%v", outcome, err)
+			}
+		})
+	}
+}
+
 func TestRejectExampleSecretRejectsExactExampleValue(t *testing.T) {
 	err := rejectExampleSecret("BEARER_TOKEN", exampleBearerToken, exampleBearerToken)
 	if err == nil {
