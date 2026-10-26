@@ -41,6 +41,9 @@ jobs:
       - name: Test self-hosted updater
         run: bash ./Self_Hosted/update_test.sh
 
+      - name: Test maintenance window
+        run: bash ./Self_Hosted/maintenance_test.sh
+
       - name: Normalize image name
         id: image
         shell: bash
