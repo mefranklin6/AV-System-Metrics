@@ -7,7 +7,14 @@ REPOSITORY_URL="${AVSM_REPOSITORY_URL:-https://raw.githubusercontent.com/mefrank
 AVSM_REF="${AVSM_REF:-main}"
 CHECK_ONLY=false
 SKIP_DATABASE_BACKUP=false
+BACKUP_LOCATION=""
+WORKSTATION_DESTINATION=""
+BACKUP_ROOT=""
 STAGE_DIR=""
+UPDATE_STARTED=false
+UPDATE_MARKER_PENDING=false
+UPDATE_START_TIME=""
+UPDATE_OUTCOME=""
 
 usage() {
   cat <<'EOF'
@@ -18,7 +25,13 @@ Download and apply the latest AV-System-Metrics self-hosted stack.
 Options:
   --ref REF                 Update from a branch, tag, or commit (default: main)
   --check                   Download, merge, and validate without changing anything
-  --skip-database-backup    Update even when a PostgreSQL backup cannot be made
+  --skip-database-backup    Update without a PostgreSQL backup (prompts on a terminal)
+  --backup-location PLACE   Backup on server or workstation (prompts on a terminal)
+  --backup-dir PATH         Absolute server directory for backups
+                            (default: <stack directory>/.avsm-backups)
+  --workstation-destination USER@HOST:/absolute/path
+                            SCP destination directory on the workstation
+                            (Windows: USER@HOST:/C:/path)
   -h, --help                Show this help
 
 Environment overrides:
@@ -37,12 +50,32 @@ warn() {
 }
 
 cleanup() {
+  local status=$?
+  local outcome
+  trap - EXIT INT TERM HUP
+  if [[ "$UPDATE_STARTED" == true ]]; then
+    outcome="${UPDATE_OUTCOME:-$(lifecycle_outcome "$status")}"
+    if [[ "$UPDATE_MARKER_PENDING" == true ]]; then
+      if ! record_lifecycle_event 'Update started' "$UPDATE_START_TIME"; then
+        warn "could not record the update start marker in the database"
+        status=1
+      fi
+    fi
+    if ! record_lifecycle_event "Update stopped: $outcome"; then
+      warn "could not record the update stop marker in the database"
+      status=1
+    fi
+  fi
   if [[ -n "$STAGE_DIR" && "$STAGE_DIR" == "$SCRIPT_DIR"/.avsm-update.tmp.* ]]; then
     rm -rf -- "$STAGE_DIR"
   fi
+  exit "$status"
 }
 
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 while (($#)); do
   case "$1" in
@@ -58,6 +91,21 @@ while (($#)); do
     --skip-database-backup)
       SKIP_DATABASE_BACKUP=true
       shift
+      ;;
+    --backup-location)
+      (($# >= 2)) || die "--backup-location requires a value"
+      BACKUP_LOCATION="$2"
+      shift 2
+      ;;
+    --backup-dir)
+      (($# >= 2)) || die "--backup-dir requires a value"
+      BACKUP_ROOT="$2"
+      shift 2
+      ;;
+    --workstation-destination)
+      (($# >= 2)) || die "--workstation-destination requires a value"
+      WORKSTATION_DESTINATION="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -92,6 +140,7 @@ readonly -a MANAGED_FILES=(
   docker-compose.database-expose-true.yml
   .env.example
   update.sh
+  lifecycle-events.sh
 )
 
 printf 'Downloading self-hosted files from %s at ref %s...\n' "$REPOSITORY_URL" "$AVSM_REF"
@@ -101,6 +150,8 @@ for managed_file in "${MANAGED_FILES[@]}"; do
     --retry 3 --output "$STAGE_DIR/$managed_file" "$download_url"
   [[ -s "$STAGE_DIR/$managed_file" ]] || die "downloaded file is empty: $managed_file"
 done
+
+source "$STAGE_DIR/lifecycle-events.sh"
 
 merge_env() {
   local base_template="$1"
@@ -334,10 +385,75 @@ if [[ "$CHECK_ONLY" == true ]]; then
   exit 0
 fi
 
+if [[ "$SKIP_DATABASE_BACKUP" == false && -t 0 ]]; then
+  read -r -p 'Back up the PostgreSQL database before updating? [Y/n]: ' database_choice || die "could not read database backup choice"
+  case "$database_choice" in
+    ''|[Yy]|[Yy][Ee][Ss]) ;;
+    [Nn]|[Nn][Oo]) SKIP_DATABASE_BACKUP=true ;;
+    *) die "answer y or n for the database backup" ;;
+  esac
+fi
+
+if [[ -z "$BACKUP_LOCATION" && -n "$WORKSTATION_DESTINATION" ]]; then
+  BACKUP_LOCATION=workstation
+elif [[ -z "$BACKUP_LOCATION" && -n "$BACKUP_ROOT" ]]; then
+  BACKUP_LOCATION=server
+fi
+
+if [[ -z "$BACKUP_LOCATION" ]]; then
+  if [[ -t 0 ]]; then
+    printf 'Where should the pre-update backup be stored?\n  1) On this server\n  2) On your workstation via SCP\n'
+    read -r -p 'Choose 1 or 2: ' backup_choice || die "could not read backup choice"
+    case "$backup_choice" in
+      1) BACKUP_LOCATION=server ;;
+      2) BACKUP_LOCATION=workstation ;;
+      *) die "choose 1 or 2 for the backup location" ;;
+    esac
+  else
+    BACKUP_LOCATION=server
+    printf 'No terminal available; using an on-server backup.\n'
+  fi
+fi
+
+DEFAULT_BACKUP_ROOT="$SCRIPT_DIR/.avsm-backups"
+case "$BACKUP_LOCATION" in
+  server)
+    [[ -z "$WORKSTATION_DESTINATION" ]] || die "--workstation-destination requires a workstation backup"
+    if [[ -z "$BACKUP_ROOT" && -t 0 ]]; then
+      printf 'The backup will be saved in a timestamped folder under:\n  %s\n' "$DEFAULT_BACKUP_ROOT"
+      read -r -p 'Press Enter to accept, or type another absolute directory: ' BACKUP_ROOT || die "could not read backup directory"
+    fi
+    BACKUP_ROOT="${BACKUP_ROOT:-$DEFAULT_BACKUP_ROOT}"
+    if [[ "$BACKUP_ROOT" == "~" || "$BACKUP_ROOT" == "~/"* ]]; then
+      BACKUP_ROOT="$HOME${BACKUP_ROOT:1}"
+    fi
+    BACKUP_ROOT="${BACKUP_ROOT%/}"
+    [[ "$BACKUP_ROOT" == /?* ]] || die "backup directory must be an absolute path other than /"
+    ;;
+  workstation)
+    [[ -z "$BACKUP_ROOT" ]] || die "--backup-dir requires a server backup"
+    # The backup is staged on the server, then copied to the workstation.
+    BACKUP_ROOT="$DEFAULT_BACKUP_ROOT"
+    command -v scp >/dev/null 2>&1 || die "scp is required for a workstation backup"
+    if [[ -z "$WORKSTATION_DESTINATION" && -t 0 ]]; then
+      read -r -p 'Workstation SCP destination (user@host:/absolute/path or user@host:/C:/path): ' WORKSTATION_DESTINATION || die "could not read workstation destination"
+    fi
+    # The user may contain '@' for domain accounts (scp splits at the last '@').
+    # Paths are POSIX absolute (/path) or Windows drive (/C:/path or C:/path).
+    # Set ports and keys with a Host alias in ~/.ssh/config.
+    destination_pattern='^[A-Za-z0-9._@-]+@[A-Za-z0-9._-]+:(/?[A-Za-z]:)?/[A-Za-z0-9._/-]+$'
+    [[ "$WORKSTATION_DESTINATION" =~ $destination_pattern && "$WORKSTATION_DESTINATION" != *..* ]] || die "workstation destination must be user@host:/absolute/path or user@host:/C:/path without spaces or '..'"
+    ;;
+  *) die "backup location must be server or workstation" ;;
+esac
+
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP_DIR="$SCRIPT_DIR/.avsm-backups/$TIMESTAMP"
-mkdir -p "$BACKUP_DIR"
-chmod 700 "$SCRIPT_DIR/.avsm-backups" "$BACKUP_DIR"
+BACKUP_DIR="$BACKUP_ROOT/$TIMESTAMP"
+mkdir -p -- "$BACKUP_DIR" || die "could not create backup directory $BACKUP_DIR"
+if [[ "$BACKUP_ROOT" == "$DEFAULT_BACKUP_ROOT" ]]; then
+  chmod 700 "$BACKUP_ROOT"
+fi
+chmod 700 "$BACKUP_DIR"
 
 for managed_file in "${MANAGED_FILES[@]}" .env; do
   if [[ -f "$SCRIPT_DIR/$managed_file" ]]; then
@@ -364,6 +480,26 @@ else
   warn "database backup explicitly skipped"
 fi
 
+if [[ "$BACKUP_LOCATION" == workstation ]]; then
+  printf 'Copying pre-update backup to %s...\n' "$WORKSTATION_DESTINATION"
+  if ! scp -r -- "$BACKUP_DIR" "$WORKSTATION_DESTINATION/"; then
+    die "workstation backup transfer failed; the stack was not changed and the server backup remains at $BACKUP_DIR"
+  fi
+  BACKUP_RESULT="${WORKSTATION_DESTINATION%/}/$TIMESTAMP"
+  rm -rf -- "$BACKUP_DIR"
+else
+  BACKUP_RESULT="$BACKUP_DIR"
+fi
+
+UPDATE_START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+UPDATE_STARTED=true
+if ! record_lifecycle_event 'Update started' "$UPDATE_START_TIME"; then
+  # Permit updates that recover a stopped database. Retry after the stack is
+  # healthy, preserving the original start time in event_timestamp.
+  UPDATE_MARKER_PENDING=true
+  warn "update start marker deferred until PostgreSQL is available"
+fi
+
 printf 'Installing the validated stack files...\n'
 for managed_file in "${MANAGED_FILES[@]}"; do
   cp -- "$STAGE_DIR/$managed_file" "$SCRIPT_DIR/$managed_file"
@@ -378,7 +514,8 @@ case "$METRICS_IMAGE" in
     warn "LEGACY_METRICS_INGEST_IMAGE is pinned to an immutable digest or commit tag"
     warn "stack files and .env were updated, but containers were not pulled or restarted"
     warn "review $SCRIPT_DIR/.env, select the intended image, and run this updater again"
-    printf 'Configuration backup: %s\n' "$BACKUP_DIR"
+    printf 'Configuration backup: %s\n' "$BACKUP_RESULT"
+    UPDATE_OUTCOME='configuration updated; containers unchanged'
     exit 2
     ;;
 esac
@@ -387,14 +524,12 @@ printf 'Pulling configured container images...\n'
 if ! (
   cd "$SCRIPT_DIR" &&
     docker compose pull &&
-    docker compose up -d &&
+    docker compose up -d --wait --wait-timeout 120 &&
     docker compose ps
 ); then
   warn "the container update did not complete"
-  warn "previous configuration and the database backup are available at $BACKUP_DIR"
+  warn "previous configuration and the database backup are available at $BACKUP_RESULT"
   exit 1
 fi
 
-printf 'Update complete. Configuration and database backup: %s\n' "$BACKUP_DIR"
-
-
+printf 'Update complete. Configuration and database backup: %s\n' "$BACKUP_RESULT"

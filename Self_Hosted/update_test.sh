@@ -275,6 +275,63 @@ grep -q '^A=old-default$' "$FAILED_INSTALL/.env"
 test -n "$(find "$FAILED_INSTALL/.avsm-backups" -name metrics.dump -print -quit)"
 [[ ! -s "$DOCKER_LOG" ]]
 
+# A server backup can be redirected to another absolute directory.
+CUSTOM_INSTALL="$TEST_ROOT/custom-install"
+CUSTOM_BACKUP_ROOT="$TEST_ROOT/custom backups"
+DOCKER_LOG="$TEST_ROOT/custom-docker.log"
+: > "$DOCKER_LOG"
+make_install "$CUSTOM_INSTALL" 'ghcr.io/example/metrics-ingest:main'
+custom_output="$(PATH="$MOCK_BIN:$PATH" AVSM_REPOSITORY_URL='https://example.invalid/repository' \
+  bash "$CUSTOM_INSTALL/update.sh" --backup-dir "$CUSTOM_BACKUP_ROOT/" 2>&1)"
+test -n "$(find "$CUSTOM_BACKUP_ROOT" -name metrics.dump -print -quit)"
+[[ ! -e "$CUSTOM_INSTALL/.avsm-backups" ]]
+grep -qF "$CUSTOM_BACKUP_ROOT/" <<< "$custom_output"
+
+# Relative directories and workstation conflicts are rejected before any change.
+for rejected_arguments in 'relative-backups' "/backups --backup-location workstation --workstation-destination tester@workstation:/backups"; do
+  rejected_install="$TEST_ROOT/rejected-dir-install"
+  rm -rf -- "$rejected_install"
+  make_install "$rejected_install" 'ghcr.io/example/metrics-ingest:main'
+  : > "$DOCKER_LOG"
+  # shellcheck disable=SC2086
+  if PATH="$MOCK_BIN:$PATH" AVSM_REPOSITORY_URL='https://example.invalid/repository' \
+    bash "$rejected_install/update.sh" --backup-dir $rejected_arguments >/dev/null 2>&1; then
+    printf 'Invalid backup directory accepted: %s\n' "$rejected_arguments" >&2
+    exit 1
+  fi
+  grep -q '^A=old-default$' "$rejected_install/.env"
+  [[ ! -s "$DOCKER_LOG" ]]
+done
+
+# On a terminal, the updater asks about the database and proposes the directory.
+if script -qec true /dev/null >/dev/null 2>&1; then
+  PROMPT_BACKUP_ROOT="$TEST_ROOT/prompted-backups"
+  for answers in "y|1|$PROMPT_BACKUP_ROOT" 'n|1|'; do
+    prompt_install="$TEST_ROOT/prompt-install"
+    rm -rf -- "$prompt_install" "$PROMPT_BACKUP_ROOT"
+    make_install "$prompt_install" 'ghcr.io/example/metrics-ingest:main'
+    : > "$DOCKER_LOG"
+    prompt_output="$(printf '%s\n' "${answers//|/$'\n'}" | PATH="$MOCK_BIN:$PATH" \
+      AVSM_REPOSITORY_URL='https://example.invalid/repository' \
+      script -qec "bash '$prompt_install/update.sh'" /dev/null 2>&1)"
+    grep -q 'Back up the PostgreSQL database before updating' <<< "$prompt_output"
+    grep -qF "$prompt_install/.avsm-backups" <<< "$prompt_output"
+    case "$answers" in
+      y*)
+        test -n "$(find "$PROMPT_BACKUP_ROOT" -name metrics.dump -print -quit)"
+        [[ ! -e "$prompt_install/.avsm-backups" ]]
+        ;;
+      n*)
+        grep -q 'database backup explicitly skipped' <<< "$prompt_output"
+        test -n "$(find "$prompt_install/.avsm-backups" -name .env -print -quit)"
+        [[ -z "$(find "$prompt_install/.avsm-backups" -name metrics.dump -print -quit)" ]]
+        ;;
+    esac
+  done
+else
+  printf 'Skipping interactive prompt tests: util-linux script is unavailable\n'
+fi
+
 # A preview validates downloads but never records an operational window.
 : > "$DOCKER_LOG"
 PATH="$MOCK_BIN:$PATH" AVSM_REPOSITORY_URL='https://example.invalid/repository' \

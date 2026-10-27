@@ -121,34 +121,74 @@ The updater:
 - Performs a three-way `.env` merge using the previous template. Local values and secrets are preserved, unchanged defaults adopt new template defaults, new settings are added, and conflicting or retired settings are reported by name without printing their values.
 - Validates the merged Compose configuration before changing live files.
 - Refuses automatic PostgreSQL major-version changes.
-- Prompts for a backup on the server or on a workstation. The workstation choice copies the previous configuration and PostgreSQL dump with SCP before applying the update.
+- Asks whether to back up the PostgreSQL database (the default is yes), then whether to store the backup on the server or on a workstation. The previous configuration is always backed up.
+- For a server backup, shows the proposed directory (`.avsm-backups/` in the stack directory). Press Enter to accept it or type another absolute directory, such as a mounted backup volume; the updater creates a timestamped folder inside it.
+- The workstation choice copies the previous configuration and PostgreSQL dump with SCP before applying the update.
 - Pulls the configured images and recreates the services with `docker compose up -d`. The `postgres_data` named volume remains in place; the updater never runs `docker compose down -v`.
 
 Preview and validate an update without changing files, backing up the database, or restarting containers:
 
 ```sh
-./update.sh --check
+bash update.sh --check
 ```
 
 The default source for the managed stack files is the `main` branch. Use `--ref` to select another branch, tag, or commit; the container image remains controlled separately by `METRICS_INGEST_IMAGE` in `.env`:
 
 ```sh
-./update.sh --ref <branch-tag-or-commit>
+bash update.sh --ref <branch-tag-or-commit>
 ```
 
-For a workstation backup, the workstation must run an SSH server reachable from the AV server. Create the destination directory on the workstation first, and make sure the SSH account can write to it. At the prompt, enter a destination such as `backupuser@workstation.example:/home/backupuser/avsm-backups`. For a Windows workstation running OpenSSH Server, use a drive path such as `backupuser@workstation.example:/C:/avsm-backups`; domain accounts such as `jdoe@campus.edu@workstation.example:/C:/avsm-backups` are accepted. Paths may not contain spaces or `..`. To use a non-default SSH port or key, define a `Host` alias in the server's `~/.ssh/config` and use that alias as the host. The updater temporarily builds the backup under `.avsm-backups/` on the server, copies it to the workstation, and removes the server copy after SCP succeeds. If SCP fails, the update stops and leaves the server copy available for recovery.
+### Backing up to a Linux Workstation
+
+For a workstation backup, the workstation must run an SSH server reachable from the AV server (Windows workstations usually do not; see [Backing Up to a Windows Workstation](#backing-up-to-a-windows-workstation)). Create the destination directory on the workstation first, and make sure the SSH account can write to it. At the prompt, enter a destination such as `backupuser@workstation.example:/home/backupuser/avsm-backups`. For a Windows workstation running OpenSSH Server, use a drive path such as `backupuser@workstation.example:/C:/avsm-backups`; domain accounts such as `jdoe@campus.edu@workstation.example:/C:/avsm-backups` are accepted. Paths may not contain spaces or `..`. To use a non-default SSH port or key, define a `Host` alias in the server's `~/.ssh/config` and use that alias as the host. The updater temporarily builds the backup under `.avsm-backups/` on the server, copies it to the workstation, and removes the server copy after SCP succeeds. If SCP fails, the update stops and leaves the server copy available for recovery.
 
 For an unattended update, select the destination with options:
 
 ```sh
-./update.sh --backup-location workstation --workstation-destination backupuser@workstation.example:/home/backupuser/avsm-backups
+bash update.sh --backup-location workstation --workstation-destination backupuser@workstation.example:/home/backupuser/avsm-backups
 ```
 
-Use `--backup-location server` for an unattended server backup. When no terminal is available and no location is selected, the updater uses the server. `--check` skips the backup prompt.
+Use `--backup-location server` for an unattended server backup, and add `--backup-dir /absolute/path` to store it outside the stack directory (`--backup-dir` alone implies a server backup). When no terminal is available and no location is selected, the updater uses `.avsm-backups/` on the server. `--check` skips the backup prompts.
 
 If `METRICS_INGEST_IMAGE` is pinned to a `sha-<commit>` tag or image digest, the updater installs and validates the new stack files but stops before pulling or restarting containers. Review `.env`, select the intended image, and run the updater again.
 
-By default, an update stops without changing the stack when the running PostgreSQL service cannot be backed up. `--skip-database-backup` overrides that protection and should only be used when you already have a verified backup or explicitly accept the risk.
+By default, an update stops without changing the stack when the running PostgreSQL service cannot be backed up. Answering `n` to the database backup prompt, or passing `--skip-database-backup`, overrides that protection and should only be used when you already have a verified backup or explicitly accept the risk.
+
+### Backing Up to a Windows Workstation
+
+Windows workstations don't run an SSH server by default, so option 2 won't work. Use option 1 and pull the backup instead:
+
+1. Run the update and choose `1`. Note the backup path it prints:
+
+   ```text
+   Update complete. Configuration and database backup: /home/avadmin/av-system-metrics/.avsm-backups/20261027T180000Z
+   ```
+
+2. On the workstation, in PowerShell:
+
+   ```powershell
+   scp -r avadmin@avserver.example:/home/avadmin/av-system-metrics/.avsm-backups/20261027T180000Z C:\avsm-backups\
+   ```
+
+   Use the same account that ran the update.
+
+3. Verify the hashes match:
+
+   ```sh
+   sha256sum .avsm-backups/20261027T180000Z/metrics.dump    # server
+   ```
+
+   ```powershell
+   Get-FileHash C:\avsm-backups\20261027T180000Z\metrics.dump    # workstation
+   ```
+
+4. On the server, from the stack directory, remove the server copy:
+
+   ```sh
+   rm -rf -- .avsm-backups/20261027T180000Z
+   ```
+
+The backup includes `.env`, so store it securely.
 
 ## Maintenance
 

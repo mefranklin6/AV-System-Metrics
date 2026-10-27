@@ -9,6 +9,7 @@ CHECK_ONLY=false
 SKIP_DATABASE_BACKUP=false
 BACKUP_LOCATION=""
 WORKSTATION_DESTINATION=""
+BACKUP_ROOT=""
 STAGE_DIR=""
 UPDATE_STARTED=false
 UPDATE_MARKER_PENDING=false
@@ -24,8 +25,10 @@ Download and apply the latest AV-System-Metrics self-hosted stack.
 Options:
   --ref REF                 Update from a branch, tag, or commit (default: main)
   --check                   Download, merge, and validate without changing anything
-  --skip-database-backup    Update even when a PostgreSQL backup cannot be made
+  --skip-database-backup    Update without a PostgreSQL backup (prompts on a terminal)
   --backup-location PLACE   Backup on server or workstation (prompts on a terminal)
+  --backup-dir PATH         Absolute server directory for backups
+                            (default: <stack directory>/.avsm-backups)
   --workstation-destination USER@HOST:/absolute/path
                             SCP destination directory on the workstation
                             (Windows: USER@HOST:/C:/path)
@@ -92,6 +95,11 @@ while (($#)); do
     --backup-location)
       (($# >= 2)) || die "--backup-location requires a value"
       BACKUP_LOCATION="$2"
+      shift 2
+      ;;
+    --backup-dir)
+      (($# >= 2)) || die "--backup-dir requires a value"
+      BACKUP_ROOT="$2"
       shift 2
       ;;
     --workstation-destination)
@@ -378,8 +386,19 @@ if [[ "$CHECK_ONLY" == true ]]; then
   exit 0
 fi
 
+if [[ "$SKIP_DATABASE_BACKUP" == false && -t 0 ]]; then
+  read -r -p 'Back up the PostgreSQL database before updating? [Y/n]: ' database_choice || die "could not read database backup choice"
+  case "$database_choice" in
+    ''|[Yy]|[Yy][Ee][Ss]) ;;
+    [Nn]|[Nn][Oo]) SKIP_DATABASE_BACKUP=true ;;
+    *) die "answer y or n for the database backup" ;;
+  esac
+fi
+
 if [[ -z "$BACKUP_LOCATION" && -n "$WORKSTATION_DESTINATION" ]]; then
   BACKUP_LOCATION=workstation
+elif [[ -z "$BACKUP_LOCATION" && -n "$BACKUP_ROOT" ]]; then
+  BACKUP_LOCATION=server
 fi
 
 if [[ -z "$BACKUP_LOCATION" ]]; then
@@ -397,11 +416,25 @@ if [[ -z "$BACKUP_LOCATION" ]]; then
   fi
 fi
 
+DEFAULT_BACKUP_ROOT="$SCRIPT_DIR/.avsm-backups"
 case "$BACKUP_LOCATION" in
   server)
     [[ -z "$WORKSTATION_DESTINATION" ]] || die "--workstation-destination requires a workstation backup"
+    if [[ -z "$BACKUP_ROOT" && -t 0 ]]; then
+      printf 'The backup will be saved in a timestamped folder under:\n  %s\n' "$DEFAULT_BACKUP_ROOT"
+      read -r -p 'Press Enter to accept, or type another absolute directory: ' BACKUP_ROOT || die "could not read backup directory"
+    fi
+    BACKUP_ROOT="${BACKUP_ROOT:-$DEFAULT_BACKUP_ROOT}"
+    if [[ "$BACKUP_ROOT" == "~" || "$BACKUP_ROOT" == "~/"* ]]; then
+      BACKUP_ROOT="$HOME${BACKUP_ROOT:1}"
+    fi
+    BACKUP_ROOT="${BACKUP_ROOT%/}"
+    [[ "$BACKUP_ROOT" == /?* ]] || die "backup directory must be an absolute path other than /"
     ;;
   workstation)
+    [[ -z "$BACKUP_ROOT" ]] || die "--backup-dir requires a server backup"
+    # The backup is staged on the server, then copied to the workstation.
+    BACKUP_ROOT="$DEFAULT_BACKUP_ROOT"
     command -v scp >/dev/null 2>&1 || die "scp is required for a workstation backup"
     if [[ -z "$WORKSTATION_DESTINATION" && -t 0 ]]; then
       read -r -p 'Workstation SCP destination (user@host:/absolute/path or user@host:/C:/path): ' WORKSTATION_DESTINATION || die "could not read workstation destination"
@@ -416,9 +449,12 @@ case "$BACKUP_LOCATION" in
 esac
 
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP_DIR="$SCRIPT_DIR/.avsm-backups/$TIMESTAMP"
-mkdir -p "$BACKUP_DIR"
-chmod 700 "$SCRIPT_DIR/.avsm-backups" "$BACKUP_DIR"
+BACKUP_DIR="$BACKUP_ROOT/$TIMESTAMP"
+mkdir -p -- "$BACKUP_DIR" || die "could not create backup directory $BACKUP_DIR"
+if [[ "$BACKUP_ROOT" == "$DEFAULT_BACKUP_ROOT" ]]; then
+  chmod 700 "$BACKUP_ROOT"
+fi
+chmod 700 "$BACKUP_DIR"
 
 for managed_file in "${MANAGED_FILES[@]}" .env; do
   if [[ -f "$SCRIPT_DIR/$managed_file" ]]; then

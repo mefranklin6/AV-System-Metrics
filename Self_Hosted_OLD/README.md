@@ -148,6 +148,58 @@ The success response is:
 {"message":"200"}
 ```
 
+## Updating the System
+
+Fetch the current updater from GitHub before each update. Run this from the server directory that contains the existing Compose files and `.env`:
+
+```sh
+AVSM_REF=main
+curl -fsSL "https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics/${AVSM_REF}/Self_Hosted_OLD/update.sh" -o update.latest.sh
+bash update.latest.sh --ref "$AVSM_REF" && rm -f update.latest.sh
+```
+
+This also works for installations created before `update.sh` was included. The updater saves the previous `update.sh` with the other configuration files, then installs the current copy. If the update fails, remove `update.latest.sh` after investigating the error.
+
+Do not download `.env.example` over `.env`. On the first update, the script will note that it has no previous template and conservatively preserve every existing value. It installs `.env.example` as the baseline for three-way merges on later updates.
+
+The updater:
+
+- Downloads the latest Compose files, `.env.example`, updater, and lifecycle event helper from the selected repository ref.
+- Performs a three-way `.env` merge using the previous template. Local values and secrets are preserved, unchanged defaults adopt new template defaults, new settings are added, and conflicting or retired settings are reported by name without printing their values.
+- Validates the merged Compose configuration before changing live files.
+- Refuses automatic PostgreSQL major-version changes.
+- Asks whether to back up the PostgreSQL database (the default is yes), then whether to store the backup on the server or on a workstation. The previous configuration is always backed up.
+- For a server backup, shows the proposed directory (`.avsm-backups/` in the stack directory). Press Enter to accept it or type another absolute directory, such as a mounted backup volume; the updater creates a timestamped folder inside it.
+- The workstation choice copies the previous configuration and PostgreSQL dump with SCP before applying the update.
+- Records `Update started` and `Update stopped: <outcome>` events in `metric_events` under the client name `AVSM-System`, so gaps in legacy data can be matched to update windows.
+- Pulls the configured images, recreates the services with `docker compose up -d`, and waits up to 120 seconds for them to become healthy. The `postgres_data` named volume remains in place; the updater never runs `docker compose down -v`.
+
+Preview and validate an update without changing files, backing up the database, or restarting containers:
+
+```sh
+bash update.sh --check
+```
+
+The default source for the managed stack files is the `main` branch. Use `--ref` to select another branch, tag, or commit; the container image remains controlled separately by `LEGACY_METRICS_INGEST_IMAGE` in `.env`:
+
+```sh
+bash update.sh --ref <branch-tag-or-commit>
+```
+
+For a workstation backup, the workstation must run an SSH server reachable from the AV server. Create the destination directory on the workstation first, and make sure the SSH account can write to it. At the prompt, enter a destination such as `backupuser@workstation.example:/home/backupuser/avsm-backups`. For a Windows workstation running OpenSSH Server, use a drive path such as `backupuser@workstation.example:/C:/avsm-backups`; domain accounts such as `jdoe@campus.edu@workstation.example:/C:/avsm-backups` are accepted. Paths may not contain spaces or `..`. To use a non-default SSH port or key, define a `Host` alias in the server's `~/.ssh/config` and use that alias as the host. The updater temporarily builds the backup under `.avsm-backups/` on the server, copies it to the workstation, and removes the server copy after SCP succeeds. If SCP fails, the update stops and leaves the server copy available for recovery. Windows workstations usually do not run an SSH server; see [Backing Up to a Windows Workstation](../Self_Hosted/README.md#backing-up-to-a-windows-workstation) to pull an on-server backup instead.
+
+For an unattended update, select the destination with options:
+
+```sh
+bash update.sh --backup-location workstation --workstation-destination backupuser@workstation.example:/home/backupuser/avsm-backups
+```
+
+Use `--backup-location server` for an unattended server backup, and add `--backup-dir /absolute/path` to store it outside the stack directory (`--backup-dir` alone implies a server backup). When no terminal is available and no location is selected, the updater uses `.avsm-backups/` on the server. `--check` skips the backup prompts.
+
+If `LEGACY_METRICS_INGEST_IMAGE` is pinned to a `sha-<commit>` tag or image digest, the updater installs and validates the new stack files but stops before pulling or restarting containers. Review `.env`, select the intended image, and run the updater again.
+
+By default, an update stops without changing the stack when the running PostgreSQL service cannot be backed up. Answering `n` to the database backup prompt, or passing `--skip-database-backup`, overrides that protection and should only be used when you already have a verified backup or explicitly accept the risk.
+
 ## Inspect PostgreSQL
 
 Open `psql` inside the database container:
