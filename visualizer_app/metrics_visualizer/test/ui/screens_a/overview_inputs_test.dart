@@ -35,10 +35,10 @@ void main() {
 
       expect(find.bySemanticsLabel(RegExp(r'^Rooms: 24\. in 6 buildings')), findsOneWidget);
       expect(find.bySemanticsLabel(RegExp(r'^Potential issues: \d+\. \d+ critical, \d+ warning, \d+ info')), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp(r'^Top input: PC\.')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Top source: PC\.')), findsOneWidget);
       // Every chart is one node with a plain-language summary.
       expect(
-        find.bySemanticsLabel(RegExp(r'^Video input share\. PC accounts for \d+\.\d% of time on screen in all rooms')),
+        find.bySemanticsLabel(RegExp(r'^Source share\. PC accounts for \d+\.\d% of time on screen in all rooms')),
         findsOneWidget,
       );
       expect(find.bySemanticsLabel(RegExp(r'^Busiest hours\. Rooms are busiest at')), findsOneWidget);
@@ -46,8 +46,8 @@ void main() {
       // Top issues, most severe first.
       expect(find.textContaining('Critical: '), findsWidgets);
       // Insights in plain language, least used input first.
-      expect(find.textContaining('DVD was selected in 1 of 24 rooms'), findsOneWidget);
-      expect(find.textContaining('ended with the inactivity auto-off'), findsOneWidget);
+      expect(find.textContaining('Blu-ray was selected in 1 of 24 rooms'), findsOneWidget);
+      expect(find.textContaining('ended with an inactivity power-off reason'), findsOneWidget);
       handle.dispose();
     });
 
@@ -81,38 +81,38 @@ void main() {
       h.navigation.goTo(AppDestination.overview);
       await settle(tester, h);
       await fitWholePage(tester);
-      await tester.tap(find.text('Open Video inputs').first);
+      await tester.tap(find.text('Open Sources').first);
       await tester.pump();
       expect(h.navigation.current, AppDestination.inputs);
     });
   });
 
-  group('Inputs', () {
+  group('Sources', () {
     testWidgets('scope and measure change every chart', (tester) async {
       final handle = tester.ensureSemantics();
       await pumpScreen(tester, AppDestination.inputs, dataset: dataset, size: extraWide);
       await fitWholePage(tester);
       expect(
         find.bySemanticsLabel(
-          RegExp(r'^Video input share\. PC accounts for \d+\.\d% of selections in all rooms \(750 of'),
+          RegExp(r'^Source share\. PC accounts for \d+\.\d% of selections in all rooms \(\d+ of'),
         ),
         findsOneWidget,
       );
-      expect(find.text('Room by input matrix'), findsOneWidget);
+      expect(find.text('Room by source matrix'), findsOneWidget);
 
       await tester.tap(segment<InputMeasure>('Time on screen'));
       await tester.pump();
-      expect(find.bySemanticsLabel(RegExp(r'^Video input share\. .* of time on screen in all rooms')), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp(r'^Inputs ranked\. .*ranked by time on screen')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Source share\. .* of time on screen in all rooms')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Sources ranked\. .*ranked by time on screen')), findsOneWidget);
 
       await tester.tap(segment<InputScope>('Building'));
       await tester.pump();
       expect(find.byKey(const ValueKey('building-menu')), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp(r'^Video input share\. .* in building AJH')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Source share\. .* in building AJH')), findsOneWidget);
       // Choose another building from the searchable menu.
       tester.widget<AppDropdownMenu<String>>(find.byKey(const ValueKey('building-menu'))).onSelected('LIB');
       await tester.pump();
-      expect(find.bySemanticsLabel(RegExp(r'^Video input share\. .* in building LIB')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Source share\. .* in building LIB')), findsOneWidget);
       expect(find.text('LIB_014'), findsOneWidget); // matrix row
       expect(find.text('BSS_245'), findsNothing);
 
@@ -121,19 +121,19 @@ void main() {
       await fitWholePage(tester);
       expect(find.byKey(const ValueKey('room-menu')), findsOneWidget);
       expect(
-        find.bySemanticsLabel(RegExp(r'^Video input share in AJH_125A|^Video input share\. .* in room AJH_125A')),
+        find.bySemanticsLabel(RegExp(r'^Source share in AJH_125A|^Source share\. .* in room AJH_125A')),
         findsOneWidget,
       );
-      expect(find.text('Room by input matrix'), findsNothing);
+      expect(find.text('Room by source matrix'), findsNothing);
       handle.dispose();
     });
 
-    testWidgets('removal candidates are listed with plain-language reasons', (tester) async {
+    testWidgets('least-used sources are listed with plain-language reasons', (tester) async {
       await pumpScreen(tester, AppDestination.inputs, dataset: dataset, size: extraWide);
       await fitWholePage(tester);
-      expect(find.text('Removal candidates'), findsWidgets);
+      expect(find.text('Least-used sources'), findsWidgets);
       expect(find.textContaining('(Rarely used campus-wide).'), findsWidgets);
-      final showAll = find.textContaining(RegExp(r'^Show all \d+ candidates$'));
+      final showAll = find.textContaining(RegExp(r'^Show all \d+ sources$'));
       expect(showAll, findsOneWidget);
       await tester.tap(showAll);
       await tester.pump();

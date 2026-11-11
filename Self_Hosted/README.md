@@ -290,7 +290,7 @@ When `ENABLE_ANALYTICS_API=true`, Compose adds two services from `docker-compose
 
 Optional resource and image settings are `ANALYTICS_API_IMAGE`, `ANALYTICS_API_PULL_POLICY`, `ANALYTICS_API_CPUS`, `ANALYTICS_API_MEMORY_LIMIT`, and `ANALYTICS_API_PIDS_LIMIT`. `ANALYTICS_PROVISION_TIMEOUT` (default `15m`, in whole hours, minutes, or seconds) bounds the provisioning job; the API starts only after provisioning finishes, and the updater waits that long plus three minutes. Raise it for a very large `metric_events` table.
 
-Repository maintainers: the first release of the Analytics API needs a one-time step on GitHub (making the new `analytics-api` container package public) before operators can pull it. See the [implementation guide](/Implementation_Guide.md).
+Repository maintainers: the first release of the Analytics API needs a one-time step on GitHub (making the new `analytics-api` container package public) before operators can pull it. See the [rollout checklist](analytics_api/ROLLOUT.md).
 
 ### Exporting a CSV for the Metrics Visualizer
 

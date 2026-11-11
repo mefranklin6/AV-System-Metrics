@@ -9,9 +9,9 @@ import 'screens_b_fixtures.dart';
 
 Issue issue({
   required String id,
-  IssueType type = IssueType.helpRequest,
+  IssueType type = IssueType.helpEvents,
   IssueSeverity severity = IssueSeverity.info,
-  LikelyCause cause = LikelyCause.training,
+  IssueArea cause = IssueArea.help,
   String room = 'BSS_245',
   String building = 'BSS',
   String? subject,
@@ -22,7 +22,7 @@ Issue issue({
       id: id,
       type: type,
       severity: severity,
-      likelyCause: cause,
+      area: cause,
       room: room,
       building: building,
       start: start,
@@ -41,9 +41,9 @@ void main() {
     issue(id: 'a', start: end.subtract(const Duration(days: 20))),
     issue(
         id: 'b',
-        type: IssueType.buttonMashing,
+        type: IssueType.repeatedPresses,
         severity: IssueSeverity.critical,
-        cause: LikelyCause.equipment,
+        cause: IssueArea.controls,
         room: 'ARTS_107',
         building: 'ARTS',
         subject: 'Btn_Volume_Up',
@@ -51,9 +51,9 @@ void main() {
         start: end.subtract(const Duration(hours: 3))),
     issue(
         id: 'c',
-        type: IssueType.offlineRoom,
+        type: IssueType.heartbeatGap,
         severity: IssueSeverity.warning,
-        cause: LikelyCause.network,
+        cause: IssueArea.reporting,
         room: 'HOLT_155',
         building: 'HOLT',
         title: 'Room offline',
@@ -72,11 +72,11 @@ void main() {
     });
 
     test('filters by type, severity and cause (empty set = all)', () {
-      expect(ids(const IssueFilter(types: {IssueType.helpRequest})), ['a', 'd']);
+      expect(ids(const IssueFilter(types: {IssueType.helpEvents})), ['a', 'd']);
       expect(ids(const IssueFilter(severities: {IssueSeverity.critical, IssueSeverity.warning})), ['b', 'c']);
-      expect(ids(const IssueFilter(causes: {LikelyCause.network})), ['c']);
+      expect(ids(const IssueFilter(areas: {IssueArea.reporting})), ['c']);
       expect(
-          ids(const IssueFilter(types: {IssueType.helpRequest}, severities: {IssueSeverity.critical})), isEmpty);
+          ids(const IssueFilter(types: {IssueType.helpEvents}, severities: {IssueSeverity.critical})), isEmpty);
     });
 
     test('filters by building, room and period', () {
@@ -106,18 +106,18 @@ void main() {
 
     test('copyWith, toggle, cleared and equality', () {
       final f = const IssueFilter().copyWith(
-        types: IssueFilter.toggle(const <IssueType>{}, IssueType.deviceLeftOn),
+        types: IssueFilter.toggle(const <IssueType>{}, IssueType.longDeviceSession),
         building: () => 'ARTS',
         sort: IssueSort.room,
       );
-      expect(f.types, {IssueType.deviceLeftOn});
-      expect(IssueFilter.toggle(f.types, IssueType.deviceLeftOn), isEmpty);
+      expect(f.types, {IssueType.longDeviceSession});
+      expect(IssueFilter.toggle(f.types, IssueType.longDeviceSession), isEmpty);
       expect(f.copyWith(building: () => null).building, isNull);
       expect(f.isDefault, isFalse);
       expect(f.cleared(), const IssueFilter(sort: IssueSort.room));
-      expect(f, const IssueFilter(types: {IssueType.deviceLeftOn}, building: 'ARTS', sort: IssueSort.room));
+      expect(f, const IssueFilter(types: {IssueType.longDeviceSession}, building: 'ARTS', sort: IssueSort.room));
       expect(f.hashCode,
-          const IssueFilter(types: {IssueType.deviceLeftOn}, building: 'ARTS', sort: IssueSort.room).hashCode);
+          const IssueFilter(types: {IssueType.longDeviceSession}, building: 'ARTS', sort: IssueSort.room).hashCode);
     });
   });
 
@@ -127,7 +127,7 @@ void main() {
       issue(id: 'y', start: end, title: 'Has, comma'),
     ]);
     final lines = csv.trim().split('\n');
-    expect(lines.first, startsWith('id,severity,type,likely_cause,building,room,subject,start_utc'));
+    expect(lines.first, startsWith('id,severity,type,area,building,room,subject,start_utc'));
     expect(lines, hasLength(3));
     expect(csv, contains("'=HYPERLINK"));
     expect(csv, contains("'+cmd"));
@@ -138,8 +138,8 @@ void main() {
 
   test('countIssuesBy keeps enum order and drops zero counts', () {
     final c = countIssuesBy(issues, (i) => i.type, IssueType.values);
-    expect(c.keys.toList(), [IssueType.buttonMashing, IssueType.offlineRoom, IssueType.helpRequest]);
-    expect(c[IssueType.helpRequest], 2);
+    expect(c.keys.toList(), [IssueType.repeatedPresses, IssueType.heartbeatGap, IssueType.helpEvents]);
+    expect(c[IssueType.helpEvents], 2);
   });
 
   test('niceTicks covers the maximum with round steps', () {

@@ -36,57 +36,92 @@ void main() {
     }
   });
 
-  test('pc is the most popular input and dvd / blu_ray are nearly unused', () {
-    final inputs = <String, int>{};
+  test('PC is the most selected source and DVD / Blu-ray are nearly unused', () {
+    final c = MetricClassifier();
+    final byLabel = <String, int>{};
     for (final e in ds.events) {
-      if (e.action == 'Started' && const ClassifierConfig().inputNames.contains(e.metric.toLowerCase())) {
-        inputs[e.metric] = (inputs[e.metric] ?? 0) + 1;
-      }
+      final m = c.classify(e.metric, e.action);
+      if (m.isSourceSelection) byLabel[m.inputLabel!] = (byLabel[m.inputLabel!] ?? 0) + 1;
     }
-    final top = inputs.entries.reduce((a, b) => a.value >= b.value ? a : b);
-    expect(top.key, 'pc');
-    final total = inputs.values.fold(0, (a, b) => a + b);
-    expect((inputs['dvd'] ?? 0) / total, lessThan(0.01));
-    expect((inputs['blu_ray'] ?? 0) / total, lessThan(0.01));
-    expect(inputs.keys, containsAll(['hdmi', 'wireless', 'doc_cam', 'station_1', 'station_1_laptop']));
+    final top = byLabel.entries.reduce((a, b) => a.value >= b.value ? a : b);
+    expect(top.key, 'PC');
+    final total = byLabel.values.fold(0, (a, b) => a + b);
+    expect((byLabel['DVD'] ?? 0) / total, lessThan(0.01));
+    expect((byLabel['Blu-ray'] ?? 0) / total, lessThan(0.01));
+    expect(byLabel.keys, containsAll(['HDMI', 'Wireless', 'Document Camera', 'Station 1', 'Station 1 Laptop']));
+  });
+
+  test('most rooms use the recommended names, the legacy rooms the also-recognized ones', () {
+    bool has(String room, String metric, String action) =>
+        eventsOf(room).any((e) => e.metric == metric && e.action == action);
+    const modern = 'SCI_101';
+    expect(demoLegacyRooms, hasLength(lessThanOrEqualTo(2)));
+    expect(demoLegacyRooms, isNot(contains(modern)));
+    for (final room in demoLegacyRooms) {
+      expect(eventsOf(room).any((e) => e.metric.startsWith('System - ')), isTrue, reason: room);
+      expect(eventsOf(room).any((e) => e.metric.startsWith('System Power')), isFalse, reason: room);
+      expect(eventsOf(room).any((e) => e.metric.startsWith('Source - ')), isFalse, reason: room);
+    }
+    for (final room in demoRooms.where((r) => !demoLegacyRooms.contains(r))) {
+      expect(eventsOf(room).any((e) => e.metric.startsWith('System - ')), isFalse, reason: room);
+      expect(eventsOf(room).any((e) => e.metric.contains('Btn_')), isFalse, reason: room);
+    }
+    expect(has(modern, 'System Power - User', 'Started'), isTrue);
+    expect(has(modern, 'Source - PC', 'Started'), isTrue);
+    expect(has(modern, 'Projector 1', 'Started'), isTrue);
   });
 
   test('contains every event family the analytics engine understands', () {
     bool has(String metric, String action) => ds.events.any((e) => e.metric == metric && e.action == action);
     for (final (m, a) in [
+      // Recommended forms.
+      ('System Power - User', 'Started'),
+      ('System Power - User', 'Stopped'),
+      ('System Power - Inactivity', 'Stopped'),
+      ('System Power - Schedule', 'Stopped'),
+      ('System Power - Remote', 'Started'),
+      ('System Power - Restore', 'Started'),
+      ('System Startup Complete', 'Trace'),
+      ('System Shutdown Complete', 'Trace'),
+      ('Program Start', 'Started'),
+      ('Projector 1', 'Started'),
+      ('Projector 1', 'Stopped'),
+      ('Camera 1', 'Started'),
+      ('Display 1', 'Started'),
+      ('Source - HDMI', 'Started'),
+      ('Help Pressed', 'Trace'),
+      ('Microphone Mute', 'Started'),
+      ('Program Audio Mute', 'Stopped'),
+      ('Volume Up Pressed', 'Trace'),
+      ('Volume Slider Released', 'Trace'),
+      ('Projector 1', 'Connected'),
+      ('Projector 1', 'Disconnected'),
+      ('Program Audio Volume', 'Level 50'),
+      // Also-recognized (legacy) forms.
       ('System - User', 'Started'),
       ('System - User', 'Stopped'),
       ('System - Inactivity', 'Stopped'),
-      ('System - Scheduled', 'Stopped'),
-      ('System - GVE', 'Started'),
-      ('System - Restore', 'Started'),
       ('System - User Reset', 'Started'),
       ('System Startup Sequence Complete', 'Trace'),
       ('System Shutdown Sequence Complete', 'Trace'),
-      ('System Restored', 'Trace'),
-      ('Initialize', 'Started'),
-      ('Initialize', 'Stopped'),
       ('Projector_1', 'Started'),
-      ('Projector_1', 'Stopped'),
-      ('Camera_1', 'Started'),
-      ('Display_1', 'Started'),
+      ('hdmi', 'Started'),
       ('Help', 'Started'),
+      ('Btn_Help Pressed', 'Trace'),
       ('Microphone Muted', 'Started'),
-      ('Program Audio Muted', 'Stopped'),
       ('Btn_Volume_Up Pressed', 'Trace'),
       ('Sldr_Volume Released', 'Trace'),
-      ('Projector_1', 'Connected'),
-      ('Projector_1', 'Disconnected'),
+      ('Program Audio Volume', 'Level 50 (Device -20.0)'),
     ]) {
       expect(has(m, a), isTrue, reason: '$m / $a');
     }
-    expect(ds.events.any((e) => e.action.startsWith('Level ')), isTrue);
-    expect(ds.events.any((e) => e.action == 'Share' && e.metric.startsWith('NAV Share - ')), isTrue);
+    expect(ds.events.any((e) => e.action == 'Share'), isTrue);
     expect(ds.events.any((e) => e.metric.endsWith(' Tapped')), isTrue);
     expect(eventsOf('AVSM-System').every((e) => e.action == 'Trace'), isTrue);
+    expect(ds.events.any((e) => e.metric.contains('GVE') || e.metric.contains('NAV Share')), isFalse);
   });
 
-  test('injected issues are present', () {
+  test('injected patterns are present', () {
     List<DateTime> times(String room, bool Function(MetricEvent) test) =>
         [for (final e in eventsOf(room)) if (test(e)) e.timestamp];
 
@@ -97,30 +132,27 @@ void main() {
       return false;
     }
 
-    expect(
-        burst(times(DemoScenario.rapidPowerCycling, (e) => e.metric == 'System - User' && e.action == 'Started'),
-            4, const Duration(minutes: 10)),
-        isTrue);
-    expect(burst(times(DemoScenario.buttonMashing, (e) => e.metric == 'Btn_Volume_Up Pressed'), 10,
-        const Duration(seconds: 10)), isTrue);
-    final nav = RegExp(ClassifierConfig.defaultNavigationButtonPattern, caseSensitive: false);
+    final c = MetricClassifier();
+    ClassifiedMetric m(MetricEvent e) => c.classify(e.metric, e.action);
+
     expect(
         burst(
-            times(DemoScenario.navigationThrash,
-                (e) => e.action == 'Trace' && e.metric.endsWith(' Pressed') && nav.hasMatch(e.metric.replaceAll(' Pressed', ''))),
-            12,
-            const Duration(seconds: 30)),
+            times(DemoScenario.rapidPowerCycling,
+                (e) => m(e).category == EventCategory.systemPower && m(e).isStart),
+            4,
+            const Duration(minutes: 10)),
         isTrue);
-    final inputNames = const ClassifierConfig().inputNames.toSet();
-    expect(
-        burst(times(DemoScenario.inputHunting, (e) => e.action == 'Started' && inputNames.contains(e.metric.toLowerCase())),
-            6, const Duration(minutes: 2)),
-        isTrue);
+    expect(burst(times(DemoScenario.repeatedPresses, (e) => e.metric == 'Video Mute Pressed'), 8,
+        const Duration(seconds: 10)), isTrue);
+    expect(burst(times(DemoScenario.rapidNavigation, (e) => m(e).isPress && m(e).isNavigation), 12,
+        const Duration(seconds: 30)), isTrue);
+    expect(burst(times(DemoScenario.rapidSourceChanges, (e) => m(e).isSourceSelection), 6,
+        const Duration(minutes: 2)), isTrue);
     expect(burst(times(DemoScenario.connectionFlapping, (e) => e.action == 'Disconnected'), 6,
         const Duration(minutes: 15)), isTrue);
 
-    // Projector left on for ~18 hours.
-    final proj = eventsOf(DemoScenario.deviceLeftOn).where((e) => e.metric == 'Projector_1').toList();
+    // Projector on for ~18 hours.
+    final proj = eventsOf(DemoScenario.longDeviceSession).where((e) => e.metric == 'Projector 1').toList();
     var longest = Duration.zero;
     DateTime? on;
     for (final e in proj) {
@@ -133,8 +165,8 @@ void main() {
     }
     expect(longest, greaterThan(const Duration(hours: 16)));
 
-    expect(eventsOf(DemoScenario.helpRequests).where((e) => e.metric == 'Help' && e.action == 'Started').length,
-        greaterThan(5));
+    expect(eventsOf(DemoScenario.helpEvents).where((e) => m(e).category == EventCategory.help).length,
+        greaterThan(15));
   });
 
   test('heartbeats: last 30 days only, an offline room and an outage', () {
@@ -145,10 +177,10 @@ void main() {
 
     final offlineSince = end.subtract(const Duration(days: DemoScenario.offlineDays));
     expect(
-        ds.heartbeats.where((h) => h.clientName == DemoScenario.offlineRoom && !h.hourStart.isBefore(offlineSince)),
+        ds.heartbeats.where((h) => h.clientName == DemoScenario.heartbeatGapRoom && !h.hourStart.isBefore(offlineSince)),
         isEmpty);
-    expect(eventsOf(DemoScenario.offlineRoom).where((e) => !e.timestamp.isBefore(offlineSince)), isEmpty);
-    expect(ds.heartbeats.where((h) => h.clientName == DemoScenario.offlineRoom), isNotEmpty);
+    expect(eventsOf(DemoScenario.heartbeatGapRoom).where((e) => !e.timestamp.isBefore(offlineSince)), isEmpty);
+    expect(ds.heartbeats.where((h) => h.clientName == DemoScenario.heartbeatGapRoom), isNotEmpty);
 
     final outage = ds.heartbeats.where((h) => h.clientName == DemoScenario.outageRoom).toList();
     final expectedHours = 30 * 24;
@@ -161,7 +193,7 @@ void main() {
       final s = ds.rangeStart.add(Duration(days: w * 7)), e = s.add(const Duration(days: 7));
       return ds.events
           .where((x) =>
-              x.metric == 'System - User' && x.action == 'Started' && !x.timestamp.isBefore(s) && x.timestamp.isBefore(e))
+              x.metric.endsWith(' - User') && x.action == 'Started' && !x.timestamp.isBefore(s) && x.timestamp.isBefore(e))
           .length;
     }
 

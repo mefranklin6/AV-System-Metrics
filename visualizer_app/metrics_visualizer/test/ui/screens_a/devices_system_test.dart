@@ -17,7 +17,7 @@ void main() {
       await pumpScreen(tester, AppDestination.devices, dataset: dataset, size: extraWide);
       await fitWholePage(tester);
       expect(find.bySemanticsLabel(RegExp(r'^Devices: 54\. 3 types')), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp(r'^Left on: 2\. sessions longer than 12 h')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Long sessions: 2\. sessions longer than 12 h')), findsOneWidget);
       expect(find.bySemanticsLabel(RegExp(r'^On-hours by device type\. Projector devices ran')), findsOneWidget);
       expect(
         find.bySemanticsLabel(RegExp(r'^On-hours by device\. .*the top 15 are drawn and the table lists all')),
@@ -35,8 +35,8 @@ void main() {
     testWidgets('left-on sessions open the room; weekly/daily toggle', (tester) async {
       final h = await pumpScreen(tester, AppDestination.devices, dataset: dataset, size: extraWide);
       await fitWholePage(tester);
-      expect(find.text('Devices left on'), findsOneWidget);
-      final leftOn = find.textContaining(RegExp('^${DemoScenario.deviceLeftOn} · .*: on for '));
+      expect(find.text('Long device sessions'), findsOneWidget);
+      final leftOn = find.textContaining(RegExp('^${DemoScenario.longDeviceSession} · .*: on for '));
       expect(leftOn, findsWidgets);
 
       await tester.tap(segment<bool>('Daily'));
@@ -46,7 +46,7 @@ void main() {
       await tester.tap(leftOn.first);
       await tester.pump();
       expect(h.navigation.current, AppDestination.rooms);
-      expect(h.navigation.selectedRoom, DemoScenario.deviceLeftOn);
+      expect(h.navigation.selectedRoom, DemoScenario.longDeviceSession);
     });
 
     testWidgets('device detail follows the chosen device', (tester) async {
@@ -99,9 +99,9 @@ void main() {
       final handle = tester.ensureSemantics();
       await pumpScreen(tester, AppDestination.systemUsage, dataset: dataset, size: extraWide);
       await fitWholePage(tester);
-      expect(find.textContaining('were ended by the inactivity auto-off'), findsWidgets);
+      expect(find.textContaining('ended with an inactivity reason'), findsWidgets);
       expect(
-        find.bySemanticsLabel(RegExp(r'^Why sessions ended\. Most sessions ended as "Turned off by user"')),
+        find.bySemanticsLabel(RegExp(r'^Why sessions ended\. Most sessions ended as "User"')),
         findsOneWidget,
       );
       expect(find.bySemanticsLabel(RegExp(r'^Power-on time of day\. Most power-ons happen at')), findsOneWidget);

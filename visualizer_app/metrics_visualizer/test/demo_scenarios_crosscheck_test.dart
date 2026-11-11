@@ -1,7 +1,8 @@
 // Cross-check between the demo generator and the analytics engine: every
-// room that DemoScenario says carries an injected problem must be flagged
+// room that DemoScenario says carries an injected pattern must be flagged
 // with the matching issue type, and the burst detectors must not flag other
-// rooms. The demo is what evaluators and screenshots use, so a detector or
+// rooms. Rooms using the recommended names and rooms using the legacy
+// ("also recognized") names must both be fully recognized. The demo is what evaluators and screenshots use, so a detector or
 // generator change that silently breaks a scenario should fail here.
 
 import 'package:flutter_test/flutter_test.dart';
@@ -14,22 +15,22 @@ void main() {
   /// The issue each scenario room was generated to show.
   const expected = <String, IssueType>{
     DemoScenario.rapidPowerCycling: IssueType.rapidPowerCycling,
-    DemoScenario.buttonMashing: IssueType.buttonMashing,
-    DemoScenario.navigationThrash: IssueType.navigationThrash,
-    DemoScenario.inputHunting: IssueType.inputHunting,
+    DemoScenario.repeatedPresses: IssueType.repeatedPresses,
+    DemoScenario.rapidNavigation: IssueType.rapidNavigation,
+    DemoScenario.rapidSourceChanges: IssueType.rapidSourceChanges,
     DemoScenario.connectionFlapping: IssueType.connectionFlapping,
-    DemoScenario.deviceLeftOn: IssueType.deviceLeftOn,
-    DemoScenario.offlineRoom: IssueType.offlineRoom,
-    DemoScenario.outageRoom: IssueType.offlineRoom,
-    DemoScenario.helpRequests: IssueType.helpRequest,
+    DemoScenario.longDeviceSession: IssueType.longDeviceSession,
+    DemoScenario.heartbeatGapRoom: IssueType.heartbeatGap,
+    DemoScenario.outageRoom: IssueType.heartbeatGap,
+    DemoScenario.helpEvents: IssueType.helpEvents,
   };
 
   /// Detectors for patterns that only the scenario room should show.
   const exclusive = {
     IssueType.rapidPowerCycling,
-    IssueType.buttonMashing,
-    IssueType.navigationThrash,
-    IssueType.inputHunting,
+    IssueType.repeatedPresses,
+    IssueType.rapidNavigation,
+    IssueType.rapidSourceChanges,
     IssueType.connectionFlapping,
   };
 
@@ -55,16 +56,32 @@ void main() {
         }
       });
 
-      test('the active learning room (four stations) is not mistaken for input hunting', () {
-        final types = {for (final i in result.issuesForRoom(DemoScenario.activeLearningRoom)) i.type};
-        expect(types, isNot(contains(IssueType.inputHunting)));
+      test('every demo event is recognized, in both naming styles', () {
+        expect(result.dataQuality.unclassifiedTotal, 0);
+        for (final room in [...demoLegacyRooms, 'SCI_101']) {
+          final s = result.sessions[room]!;
+          expect(s.system, isNotEmpty, reason: room);
+          expect(s.devices, isNotEmpty, reason: room);
+          expect(s.inputs, isNotEmpty, reason: room);
+          expect(s.mutes, isNotEmpty, reason: room);
+        }
+        // Recommended-name rooms log an automatic default source.
+        expect(result.sessions['SCI_101']!.automaticInputStarts, isNotEmpty);
+        // The legacy "System - User Reset" Started while on is a marker only.
+        expect(result.sessions[DemoScenario.startedWhileOnRoom]!.duplicateStarts, greaterThan(0));
+        expect(result.system.offReasons[OffReason.remote], greaterThan(0));
       });
 
-      test('the help request room stands out', () {
+      test('the active learning room (four stations) shows no rapid source changes', () {
+        final types = {for (final i in result.issuesForRoom(DemoScenario.activeLearningRoom)) i.type};
+        expect(types, isNot(contains(IssueType.rapidSourceChanges)));
+      });
+
+      test('the help-labelled events room stands out', () {
         int helpIn(String room) =>
-            result.issuesForRoom(room).where((i) => i.type == IssueType.helpRequest).length;
+            result.issuesForRoom(room).where((i) => i.type == IssueType.helpEvents).length;
         final busiest = demoRooms.reduce((a, b) => helpIn(a) >= helpIn(b) ? a : b);
-        expect(busiest, DemoScenario.helpRequests);
+        expect(busiest, DemoScenario.helpEvents);
       });
     });
   }

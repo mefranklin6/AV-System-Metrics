@@ -156,7 +156,7 @@ void main() {
 
   test('validateAnalysisConfig checks every limit', () {
     expect(validateAnalysisConfig(const AnalysisConfig()), isNull);
-    expect(validateAnalysisConfig(const AnalysisConfig(classifier: ClassifierConfig(inputNames: []))), isNotNull);
+    expect(validateAnalysisConfig(const AnalysisConfig(classifier: ClassifierConfig(inputNames: [], sourcePrefixes: []))), isNotNull);
     expect(validateAnalysisConfig(const AnalysisConfig(thresholds: IssueThresholds(buttonMashCount: 1))), isNotNull);
     expect(validateAnalysisConfig(const AnalysisConfig(thresholds: IssueThresholds(inputHuntWindow: Duration.zero))),
         isNotNull);

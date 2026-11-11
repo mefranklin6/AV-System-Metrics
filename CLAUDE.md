@@ -70,8 +70,9 @@ flutter pub get
 flutter analyze
 flutter test                                   # unit, widget and accessibility-guideline tests
 flutter test test/analytics                    # one directory
-flutter build web --release                    # CI builds this; it catches dart2js-only errors (e.g. int64 literals) that VM tests miss
-flutter run -d windows                         # or -d chrome
+flutter build windows --release                # what CI (.github/workflows/visualizer-app.yml, windows-latest) builds and ships
+flutter run -d windows
+flutter build web --release                    # not in CI; catches dart2js-only errors (e.g. int64 literals) that VM tests miss
 ```
 
 ## Architecture and cross-cutting contracts
@@ -124,9 +125,6 @@ Every client exposes the same API: `heartbeat()`, `start()`, `stop()`, `trace()`
   - `lib/analytics`: a pure-Dart engine with no Flutter imports; it runs in an isolate. Its `README.md` documents session semantics.
   - `lib/state`: `ChangeNotifier`s.
   - `lib/ui`: theme, shared accessible widgets and screens.
-- Data semantics come from the Extron ControlScript template:
-  - Inputs are `Started` with a source key and never `Stopped`.
-  - `System - User`, `System - Restore` and `System - GVE` `Started` begin a system session; any `System - *` `Stopped` ends it.
-  - `Initialize` is a processor boot.
-  - `AVSM-System` is excluded from analysis.
+- Event semantics come from the platform-neutral `Implementation_Guide.md` (repo root), which is the contract between control programs and the visualizer. The classifier's defaults implement its "Recommended" and "Also recognized" forms, and every rule is configurable in Settings. The Extron ControlScript template is only one implementation whose names the defaults accept, so do not add rules that assume a specific program. Never interpret what a control does: help-labelled events are counted, not explained. Issue text states what the data shows and suggests neutral follow-ups for AV analysts; it does not assume a help desk, tickets or training needs. `AVSM-System` is excluded from analysis.
 - Accessibility is a release requirement: target WCAG 2.2 AA, VPAT and higher-ed ITPR. Every chart needs a text summary and a table view. Every animation must go through the app's motion settings, which honor reduce motion. Screens are tested with `meetsGuideline` at 200% text and narrow widths. `ACCESSIBILITY.md` is the ACR/VPAT basis, so update it when behavior changes.
+- The root `.gitignore` started as a Python template. Its directory rules are anchored (`/lib/`, `/parts/`, ...) because unanchored ones silently excluded the app's `lib/` and `lib/ui/screens/parts/`, and `*.manifest` needs the explicit exception for `windows/runner/runner.exe.manifest`. Check `git status --ignored` when adding new folders.

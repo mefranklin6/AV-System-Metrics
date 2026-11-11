@@ -48,7 +48,7 @@ void main() {
     expect(c.maxSessionLength, const Duration(hours: 16));
   });
 
-  test('navigation pattern skips the power-on and backlight buttons', () {
+  test('default navigation pattern matches whole parts only', () {
     final nav = RegExp(
       ClassifierConfig.defaultNavigationButtonPattern,
       caseSensitive: false,
@@ -61,33 +61,134 @@ void main() {
       'Btn_Settings_Menu',
       'Btn_Help_Tab',
       'Btn_Home',
-      'Btn_Exit',
+      'Btn_Start_Page',
+      'Camera Page',
+      'Main-Menu',
+      'Navigation',
     ]) {
       expect(nav.hasMatch(yes), isTrue, reason: yes);
     }
     for (final no in [
-      'Btn_Start_Page',
       'Btn_Backlight',
       'Btn_Std_Backlight',
       'Btn_Volume_Up',
+      'Btn_Exit',
+      'Tablet',
     ]) {
       expect(nav.hasMatch(no), isFalse, reason: no);
     }
   });
 
-  test('a saved copy of the old navigation default is upgraded', () {
-    final json = const AnalysisConfig().toJson();
-    (json['classifier'] as Map<String, Object?>)['navigationButtonPattern'] =
-        ClassifierConfig.previousNavigationButtonPattern;
+  test('saved copies of earlier default patterns are upgraded', () {
+    for (final old in ClassifierConfig.previousNavigationButtonPatterns) {
+      final json = const AnalysisConfig().toJson();
+      (json['classifier'] as Map<String, Object?>)['navigationButtonPattern'] =
+          old;
+      final back = AnalysisConfig.fromJson(
+        (jsonDecode(jsonEncode(json)) as Map).cast<String, Object?>(),
+      );
+      expect(
+        back.classifier.navigationButtonPattern,
+        ClassifierConfig.defaultNavigationButtonPattern,
+      );
+    }
+    final dev = ClassifierConfig.fromJson({
+      'devicePattern': ClassifierConfig.previousDevicePatterns.single,
+    });
+    expect(dev.devicePattern, ClassifierConfig.defaultDevicePattern);
+    final custom = ClassifierConfig.fromJson({
+      'navigationButtonPattern': 'X',
+      'devicePattern': r'^(Amp)_\d+$',
+    });
+    expect(custom.navigationButtonPattern, 'X');
+    expect(custom.devicePattern, r'^(Amp)_\d+$');
+  });
+
+  test('settings saved by the previous version load with new defaults', () {
+    // The classifier keys an earlier version saved, nothing else.
+    final old = <String, Object?>{
+      'classifier': {
+        'inputNames': ['pc', 'hdmi'],
+        'devicePattern': ClassifierConfig.previousDevicePatterns.single,
+        'navigationButtonPattern':
+            ClassifierConfig.previousNavigationButtonPatterns.last,
+        'buildingPattern': r'^([A-Za-z]+)[_\- ]?',
+      },
+      'thresholds': const IssueThresholds(buttonMashCount: 9).toJson(),
+    };
     final back = AnalysisConfig.fromJson(
-      (jsonDecode(jsonEncode(json)) as Map).cast<String, Object?>(),
+      (jsonDecode(jsonEncode(old)) as Map).cast<String, Object?>(),
+    );
+    final c = back.classifier;
+    expect(c.inputNames, ['pc', 'hdmi']);
+    expect(c.systemPowerNames, ClassifierConfig.defaultSystemPowerNames);
+    expect(c.powerReasonSynonyms, ClassifierConfig.defaultPowerReasonSynonyms);
+    expect(c.sourcePrefixes, ClassifierConfig.defaultSourcePrefixes);
+    expect(c.programStartNames, ClassifierConfig.defaultProgramStartNames);
+    expect(c.startupCompleteNames, ClassifierConfig.defaultStartupCompleteNames);
+    expect(
+      c.shutdownCompleteNames,
+      ClassifierConfig.defaultShutdownCompleteNames,
     );
     expect(
-      back.classifier.navigationButtonPattern,
-      ClassifierConfig.defaultNavigationButtonPattern,
+      c.repeatableControlPattern,
+      ClassifierConfig.defaultRepeatableControlPattern,
     );
-    final custom = ClassifierConfig.fromJson({'navigationButtonPattern': 'X'});
-    expect(custom.navigationButtonPattern, 'X');
+    expect(c.helpPattern, ClassifierConfig.defaultHelpPattern);
+    expect(c.devicePattern, ClassifierConfig.defaultDevicePattern);
+    expect(back.thresholds.buttonMashCount, 9);
+  });
+
+  test('every classifier field round-trips through JSON and copyWith', () {
+    const c = ClassifierConfig(
+      systemPowerNames: ['Room Power'],
+      powerReasonSynonyms: {
+        'user': ['Panel'],
+      },
+      sourcePrefixes: ['Route >'],
+      inputNames: ['apple_tv'],
+      devicePattern: r'^(Amp)_\d+$',
+      programStartNames: ['Boot'],
+      startupCompleteNames: ['Ready'],
+      shutdownCompleteNames: ['Asleep'],
+      navigationButtonPattern: 'Go',
+      repeatableControlPattern: 'Spin',
+      helpPattern: 'assist',
+      buildingPattern: r'^([A-Z]+)',
+    );
+    final back = ClassifierConfig.fromJson(
+      (jsonDecode(jsonEncode(c.toJson())) as Map).cast<String, Object?>(),
+    );
+    expect(back.toJson(), c.toJson());
+    final d = const ClassifierConfig().copyWith(
+      systemPowerNames: c.systemPowerNames,
+      powerReasonSynonyms: c.powerReasonSynonyms,
+      sourcePrefixes: c.sourcePrefixes,
+      inputNames: c.inputNames,
+      devicePattern: c.devicePattern,
+      programStartNames: c.programStartNames,
+      startupCompleteNames: c.startupCompleteNames,
+      shutdownCompleteNames: c.shutdownCompleteNames,
+      navigationButtonPattern: c.navigationButtonPattern,
+      repeatableControlPattern: c.repeatableControlPattern,
+      helpPattern: c.helpPattern,
+      buildingPattern: c.buildingPattern,
+    );
+    expect(d.toJson(), c.toJson());
+    expect(const ClassifierConfig().copyWith().toJson(), const ClassifierConfig().toJson());
+  });
+
+  test('list problems: sources and reason groups', () {
+    expect(const ClassifierConfig().listProblem(), isNull);
+    expect(const ClassifierConfig(inputNames: []).listProblem(), isNull);
+    expect(
+      const ClassifierConfig(inputNames: [], sourcePrefixes: [' ']).listProblem(),
+      isNotNull,
+    );
+    expect(
+      const ClassifierConfig(powerReasonSynonyms: {'gve': ['GVE']}).listProblem(),
+      isNotNull,
+    );
   });
 
   test('device type overrides round-trip and apply case-insensitively', () {

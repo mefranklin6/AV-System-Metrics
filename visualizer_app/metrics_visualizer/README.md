@@ -1,16 +1,21 @@
 # AV Metrics Visualizer
 
-An accessible desktop and web app that turns AV System Metrics data into
-answers for higher-education AV professionals, managers and administrators.
-It shows how rooms and devices are really used, so budget and system-design
-decisions can be based on evidence instead of anecdotes.
+An accessible desktop app that turns AV System Metrics data into usage
+figures for AV professionals and analysts: how rooms, sources and devices
+are used, so budget and system-design decisions can be based on evidence.
 
 The Visualizer is **optional** and **read-only**. It never writes to the
 metrics database and it is completely separate from the services that collect
 the data. You can run it from a CSV export without changing the server at
 all.
 
+It works with data from any control program on any platform (Extron,
+Crestron, AMX, Q-SYS or others). It does not know what program a room runs
+or what its controls do, so it reports what the events show and leaves the
+interpretation to you.
+
 - [What it answers](#what-it-answers)
+- [How it reads your events](#how-it-reads-your-events)
 - [Get the app](#get-the-app)
 - [Quick start](#quick-start)
 - [Hosting the web build](#hosting-the-web-build)
@@ -25,40 +30,72 @@ all.
 
 | Question | Where to look |
 | --- | --- |
-| Which video inputs do people actually use, campus-wide, per building and per room? Which inputs could be removed at the next refresh? | Video inputs |
-| How many hours are projectors, displays and cameras on? Which devices are left on overnight? | Devices |
-| When are rooms turned on and off? How long are sessions? How often does auto-off or a schedule turn rooms off instead of people? How well used is each room in teaching hours? | System usage |
-| Are room processors online? When were rooms offline? Which devices keep dropping their connection? | Connectivity |
-| Where are people struggling? Rapid power cycling, repeated button presses, navigation confusion, searching for an input, unstable connections, devices left on, offline rooms and help requests | Issues |
-| When will a projector reach its rated lamp or light-source life at current usage? Which inputs are growing or declining? | Forecast |
-| How is one specific room used? | Rooms |
+| Which sources are selected, and how long are they on screen, campus-wide, per building and per room? Which sources are least used? | Sources |
+| How many hours is each device on? Which device sessions ran longer than a set time? | Devices |
+| When are rooms turned on and off? How long are sessions? Which power-off reasons did programs log (user, schedule, inactivity, remote, or any other reason as logged)? How much of business hours is each room in use? | System usage |
+| Which rooms sent heartbeats, and when were there gaps? Which devices changed communication state repeatedly? | Connectivity |
+| Which patterns in the data are worth reviewing? Repeated power cycling, repeated presses of one control, rapid navigation presses, rapid source changes, repeated connection changes, long device sessions, heartbeat gaps and help-labelled events | Issues |
+| When will a device reach its rated life at current usage? Which sources are selected more or less over time? | Forecast |
+| How is one specific room used, and how was each of its events recognized? | Rooms |
+
+## How it reads your events
+
+Control processors send four fields per event: client name, timestamp,
+metric and action. The Visualizer recognizes events by name, following the
+[Implementation Guide](../../Implementation_Guide.md) at the repository root,
+which describes which events a control program should log and how to name
+them (`System Power` Started / Stopped, `Source - <name>`, `Projector 1`,
+`Program Start`, `<Control> Pressed`, and so on). By default it accepts the
+guide's recommended names and the other forms the guide lists, so programs
+written before the guide keep working. For example, the names used by the
+Extron ControlScript template this project started with (`System - User`,
+`Initialize`, `Projector_1`, bare source names such as `hdmi`) are among the
+accepted forms. That template is one implementation among many and is not
+required.
+
+If a program logs events under other names, you do not need to change the
+program. Open **Settings > Event recognition** and adjust the name lists and
+patterns: system power names, power reason groups, source prefixes and source
+names, the device pattern and device type overrides, program start names,
+startup and shutdown complete names, and the navigation, repeatable control,
+help and building patterns. Each field shows its default and can be reset.
+
+To check an implementation:
+
+- The **Room timeline** (Rooms, then a room) lists every event with the
+  category it was recognized as, such as "Source: source "HDMI 1"",
+  "Control: navigation" or "Not recognized".
+- **Data quality** on the Overview lists the most common metric and action
+  pairs that matched no rule, with a link to Event recognition.
+
+The app never assumes what a control does. A control whose name contains
+"help" is reported as a help-labelled event, with when and how often it was
+used, and nothing more. Patterns on the Issues page describe what the data
+shows and list neutral things worth checking; they are not diagnoses.
 
 ## Get the app
 
-You do not need the Flutter SDK to use the Visualizer. Ready-to-run builds
-are attached to the repository's GitHub Releases (tags named
+You do not need the Flutter SDK to use the Visualizer. Ready-to-run Windows
+builds are attached to the repository's GitHub Releases (tags named
 `visualizer-v<version>`), together with a `SHA256SUMS.txt` file to check the
 downloads against.
 
-- **Windows:** download `metrics-visualizer-windows-x64.zip`, unzip it to a
-  folder (for example in your user folder) and run `metrics_visualizer.exe`.
-  Keep the files in the folder together. The build is not code-signed, so
-  Windows SmartScreen may ask you to confirm the first time. If Windows
-  reports that `VCRUNTIME140.dll` or `MSVCP140.dll` is missing, install the
-  Microsoft Visual C++ Redistributable (x64).
-- **Web:** download `metrics-visualizer-web.zip`, unzip it onto an internal
-  HTTPS web server (IIS, nginx, Apache) and give people the site address.
-  See [Hosting the web build](#hosting-the-web-build) for the CORS setting
-  and a Content Security Policy.
-- **macOS and Linux:** build from source (below).
-
-If no release has been published yet, an administrator can build the web
-version once (below) and host it for everyone.
+- **Windows** (the built, tested and shipped platform): download
+  `metrics-visualizer-windows-x64.zip`, unzip it to a folder (for example in
+  your user folder) and run `metrics_visualizer.exe`. Keep the files in the
+  folder together. The build is not code-signed, so Windows SmartScreen may
+  ask you to confirm the first time. If Windows reports that
+  `VCRUNTIME140.dll` or `MSVCP140.dll` is missing, install the Microsoft
+  Visual C++ Redistributable (x64).
+- **Web, macOS and Linux:** the same source compiles for these platforms,
+  but they are not built, tested or released by CI and are unverified. Build
+  them from source (below) if you need them, and please report any problem
+  as an issue.
 
 ## Quick start
 
 Prerequisites: the Flutter SDK, stable channel (the project is built and
-tested with Flutter 3.47 / Dart 3.13). Run `flutter doctor` to check the
+tested with Flutter 3.47.6 / Dart 3.13). Run `flutter doctor` to check the
 desktop toolchain for your platform:
 
 - **Windows:** Visual Studio 2022 with the "Desktop development with C++"
@@ -83,34 +120,34 @@ cd visualizer_app/metrics_visualizer
 flutter pub get
 
 # Run
-flutter run -d windows      # or: -d macos, -d linux
-flutter run -d chrome       # web, in a local browser
+flutter run -d windows      # or: -d macos, -d linux (unverified)
+flutter run -d chrome       # web, in a local browser (unverified)
 
 # Build
-flutter build windows       # build/windows/x64/runner/Release/
-flutter build macos
-flutter build linux
-flutter build web --release --no-web-resources-cdn   # build/web/ (static files)
+flutter build windows --release   # build/windows/x64/runner/Release/
+flutter build macos               # unverified
+flutter build linux               # unverified
+flutter build web --release --no-web-resources-cdn   # build/web/ (static files, unverified)
 ```
 
-Platform status: the Windows and web builds are built and tested. The Linux
-build follows the same code. The macOS build has the sandbox entitlements it
-needs (outbound network for the API, read access to files you choose for CSV
-import) and keeps a remembered token in the login keychain, but it has not
-yet been verified on a Mac; please report any problem as an issue.
+Platform status: Windows is the platform CI analyzes, tests, builds and
+releases. The web, Linux and macOS builds follow the same code and are kept
+compiling (the macOS build has the sandbox entitlements it needs and keeps a
+remembered token in the login keychain), but none of them is built or
+verified by CI.
 
 ## Hosting the web build
 
-The web build is static files. You can host it on any HTTPS web server, for
-example an internal IIS or nginx site. Nothing in the build contains
-credentials.
+The web build is unverified (see above). If you build it, it is static
+files that you can host on any HTTPS web server, for example an internal
+IIS or nginx site. Nothing in the build contains credentials.
 
-- **Build it with `--no-web-resources-cdn`** (as shown above, and as CI and
-  the release builds do). The app then makes no requests to any site other
-  than the one that hosts it and the Analytics API you connect to: CanvasKit
-  (the rendering engine) is served from the site's `canvaskit/` folder and
-  the Roboto font is bundled, instead of both being downloaded from Google's
-  `gstatic.com` servers. It also works on isolated networks.
+- **Build it with `--no-web-resources-cdn`** (as shown above). The app then
+  makes no requests to any site other than the one that hosts it and the
+  Analytics API you connect to: CanvasKit (the rendering engine) is served
+  from the site's `canvaskit/` folder and the Roboto font is bundled, instead
+  of both being downloaded from Google's `gstatic.com` servers. It also works
+  on isolated networks.
 - **Fallback fonts.** Characters that Roboto does not contain (for example
   Chinese, Japanese or Korean text, or emoji, in room or device names) would
   normally be drawn with fonts downloaded from `fonts.gstatic.com`. This build
@@ -130,10 +167,10 @@ credentials.
 - **Serve it from its own origin** (its own host name), not a path on a site
   that runs other web apps, so other scripts cannot read a token remembered
   for the tab.
-- **Content Security Policy.** This policy was tested with a release build
-  in Chrome: the app loads and renders with no violations reported, and every
-  request goes to the hosting site. Replace `https://avsm.example.edu` with
-  your Analytics API origin:
+- **Content Security Policy.** This policy was tested with an earlier release
+  build in Chrome: the app loaded and rendered with no violations reported,
+  and every request went to the hosting site. Replace
+  `https://avsm.example.edu` with your Analytics API origin:
 
   ```text
   Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://avsm.example.edu; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'
@@ -171,7 +208,7 @@ Notes:
   use `interval '120 days'`. For everything, remove the `WHERE` clause.
 - **Heartbeats.** The export includes the heartbeat rows (`Ok` /
   `Heartbeat`). They are most of the table and the app needs them for the
-  online percentages and offline periods on the Connectivity page. The
+  online percentages and heartbeat gaps on the Connectivity page. The
   server deletes heartbeats older than `HEARTBEAT_RETENTION_DAYS` (30 days by
   default), so in a 90-day export only the most recent 30 days have uptime
   data. The Connectivity page explains this next to the figures. To keep the
@@ -207,11 +244,12 @@ cancel the download at any time.
 ### 3. Demo data
 
 **Explore demo data** loads a synthetic campus of 24 rooms in 6 buildings
-over 10 weeks. It has realistic class schedules, input habits, a slowly
-growing usage trend, an offline room and planted issues (rapid power
-cycling, button mashing, navigation confusion, input hunting, connection
-flapping and a device left on overnight). Use it for training, evaluation
-and accessibility testing without real data.
+over 10 weeks. It has realistic class schedules, source habits, a slowly
+growing usage trend, a room with a heartbeat gap and planted patterns
+(repeated power cycling, repeated presses of one control, rapid navigation
+presses, rapid source changes, repeated connection changes and a long device
+session). Use it to explore the app, for evaluation and for accessibility
+testing without real data.
 
 ## Screens and features
 
@@ -224,17 +262,17 @@ and **Copy as CSV** buttons and a one-sentence summary of the main finding.
 
 | Screen | Features |
 | --- | --- |
-| **Overview** | Headline figures (rooms, buildings, events, system hours, average daily hours per room, most-used input, issue counts, busiest time), weekly system hours, written insights and the top issues. Warnings about the data (for example how spreadsheet dates were read, or a settings pattern that could not be used) are shown near the top, and an **About this data** card lists skipped rows, excluded clients, unrecognised events and sessions that had to be closed by a rule. |
-| **Rooms** | Searchable room list with usage, utilization, uptime and issue counts. Each room has its own input share, device hours, weekday-by-hour use, recent issues and an event timeline. Other screens link here with "Open room". |
-| **Video inputs** | Input share by number of selections and by time on screen, campus-wide, per building and per room. Removal candidates (inputs that are rarely or never used) and a room-by-input matrix. The default source the room program selects by itself at power-on is not counted as a selection, but its time on screen is; a **How inputs are counted** card explains this and says how many startup selections were left out. |
-| **Devices** | On-hours per device, per room and per device type. Daily and weekly trends, devices left on, and per-device detail. When the data has `Projector_N` devices, a note explains that the ControlScript template logs every display, flat panels included, as `Projector_N`, with a link to the device type overrides in Settings. |
-| **System usage** | Power-on and power-off time of day, a weekday-by-hour heatmap of rooms in use, session lengths, off reasons (user, inactivity, schedule, remote) and utilization per room in teaching hours. |
-| **Connectivity** | Connected and Disconnected events per day (stacked bars), a sortable table by room and device, and the raw event log. Processor online percentage per room, sortable, with the heartbeat coverage period and the server's retention period shown. Each room is measured from its first heartbeat or event; a room that sent no heartbeats shows "No heartbeats" (never 0%) in the chart, table and CSV. A last-seen time that comes from a heartbeat reads "During the hour starting ...", because heartbeats are counted per hour. Offline periods with links to each room, and a callout for devices with unstable (flapping) connections. If there are no connection events or no heartbeats, the page explains why and what to enable. |
-| **Issues** | Counts by type or by likely cause (equipment, training or usability, network, configuration). A filterable list by severity, type, cause, building, room, time and free text. Each issue opens to show a plain-language explanation, a suggested action, the details, the evidence events and a link to the room. Severity is shown with an icon and a word, never by colour alone. The filtered issues can be copied as CSV for a ticket system or spreadsheet. |
-| **Forecast** | A replacement-planning table for each device: observed hours, weekly run-rate, trend, share of rated life used, projected date to reach rated life, likely range and a confidence rating. A chart of cumulative hours with the projection and likely range for 1, 3 or 5 years. Weekly selections of the most-used inputs, and written growing or declining statements for every input. An assumptions panel, with a link to the rated-life values in Settings. The same `Projector_N` note as on Devices, because a flat panel logged as a projector would otherwise be forecast with a projector's rated life. If there is not enough data, the page says what is needed. |
+| **Overview** | Headline figures (rooms, buildings, system hours, average daily hours per room, top source, issue counts, busiest time), weekly system hours, written observations and the top issues. Warnings about the data (for example how spreadsheet dates were read, or a settings pattern that could not be used) are shown near the top. A **Data quality** card lists skipped rows, excluded clients and sessions that had to be closed by a rule, and a sortable table of the most common metric and action pairs that matched no event recognition rule, with a link to **Settings > Event recognition** and the Implementation Guide's address. |
+| **Rooms** | Searchable room list with usage, utilization, uptime and issue counts. Each room has its own source share, device hours, weekday-by-hour use, recent issues, counts of help-labelled events, program starts and control presses, and an event timeline. The timeline shows every event (heartbeats excluded) with what it was recognized as (category plus detail such as the source name, device type, power reason group or whether a control counts as navigation), and can be filtered by category. Other screens link here with "Open room". |
+| **Sources** | Source share by number of selections and by time on screen, campus-wide, per building and per room. The least-used sources (rarely selected, or never selected in a room where other rooms in the same building select them) and a room-by-source matrix. The default source a program selects by itself at power-on is not counted as a selection, but its time on screen is; a **How sources are counted** card explains this and says how many startup selections were left out. |
+| **Devices** | On-hours per device, per room and per device type. Daily and weekly trends, long device sessions, and per-device detail. A note explains that device types come from metric names, with a link to **Device type overrides** in Settings. |
+| **System usage** | Power-on and power-off time of day, a weekday-by-hour heatmap of rooms in use, session lengths, why sessions ended (the reason groups user, schedule, inactivity and remote, other reasons, program start, no reason logged) and utilization per room in business hours. Power-off reasons outside the standard groups are listed exactly as logged in their own chart and table. |
+| **Connectivity** | Connected and Disconnected events per day (stacked bars), a sortable table by room and device, and the raw event log. Processor online percentage per room, sortable, with the heartbeat coverage period and the server's retention period shown. Each room is measured from its first heartbeat or event; a room that sent no heartbeats shows "No heartbeats" (never 0%) in the chart, table and CSV. A last-seen time that comes from a heartbeat reads "During the hour starting ...", because heartbeats are counted per hour. Heartbeat gaps (no heartbeat or event for longer than the threshold) with links to each room, and a callout for devices whose connection state changed repeatedly. If there are no connection events or no heartbeats, the page explains why. |
+| **Issues** | Counts by type or by data area (system power, controls, sources, device communication, device power, heartbeats, help-labelled). A filterable list by severity, type, data area, building, room, time and free text. Each issue opens to show **What the data shows**, **Worth checking** (neutral follow-ups), the details, the evidence events and a link to the room. Severity is shown with an icon and a word, never by colour alone. The filtered issues can be copied as CSV (columns include `area` and `worth_checking`). |
+| **Forecast** | A replacement-planning table for each device: observed hours, weekly run-rate, trend, share of rated life used, projected date to reach rated life, likely range and a confidence rating. A chart of cumulative hours with the projection and likely range for 1, 3 or 5 years. Weekly selections of the most-used sources, and written growing or declining statements for every source. An assumptions panel, with a link to the rated-life values in Settings, and the same device type note as on Devices. If there is not enough data, the page says what is needed. |
 | **Data source** | CSV import with the export command, the API connection form, demo data and a summary of what is loaded. |
-| **Settings** | Theme (system, light or dark), high contrast, colour-blind-safe chart palettes, chart patterns, text size (100% to 200%), reduce motion, local time or UTC, excluded clients, input names and patterns, issue thresholds, business hours, rated life per device type, **device types for particular devices** and the keyboard shortcuts. Device type overrides set the real type of one device (for example `BSS_112/Projector_1` is a `DISPLAY`; room and device names are not case-sensitive), so a flat panel logged as `Projector_1` is grouped and forecast as a display. The navigation button pattern deliberately leaves out `Btn_Start_Page` (the power-on button) and the camera backlight buttons. If "Device left on after" is at or above "Longest believable session", a note explains that devices whose off event was lost will not be flagged. Changes apply immediately and are saved on this computer. |
-| **About** | Version, accessibility statement and data and privacy notes. |
+| **Settings** | Theme (system, light or dark), high contrast, colour-blind-safe chart palettes, chart patterns, text size (100% to 200%), reduce motion, local time or UTC, excluded clients, **Event recognition**, issue detection thresholds, rated life per device type and the keyboard shortcuts. Event recognition exposes every name list and pattern the app uses to recognize events (see [How it reads your events](#how-it-reads-your-events)), each with a description, its default and a reset button, plus **Device type overrides** (for example `SCI-101/Projector 1` is a `DISPLAY`; room and device names are not case-sensitive). Links on other pages ("Open Event recognition settings", "Set device types in Settings", "Detection thresholds") scroll to and focus the matching section. If "Long device session after" is at or above "Longest believable session", a note explains that devices whose off event was lost will not be reported. Changes apply immediately and are saved on this computer. |
+| **About** | Version, the Implementation Guide's address, accessibility statement and data and privacy notes. |
 
 Keyboard shortcuts (Cmd instead of Ctrl on macOS): Ctrl+O opens a CSV file,
 Ctrl+1 to Ctrl+8 open the analysis pages, Ctrl+D opens Data source, Ctrl+,
@@ -246,24 +284,30 @@ The analytics engine (`lib/analytics/`) is plain Dart. It runs in a
 background isolate, so the window stays responsive with millions of rows.
 In short:
 
+- **Events are recognized by name** (see
+  [How it reads your events](#how-it-reads-your-events)). Events that match
+  no rule are kept for the room timeline and listed under Data quality.
 - **Sessions** are rebuilt from start and stop events. A room's system
-  session runs from power-on to the first off event (user, inactivity
-  auto-off, schedule, remote or processor restart). A session with no off
-  event is capped at 16 hours (the **Longest believable session** setting),
-  so one lost event cannot inflate the totals. A device whose real off event
+  session runs from power-on to the first off event (a system power Stopped
+  with any reason, or a program start event). A session with no off event is
+  capped at 16 hours (the **Longest believable session** setting), so one
+  lost event cannot inflate the totals. A device whose real off event
   arrives later, up to 7 days after it turned on, still ends its session
-  there. An input stays on screen until another input is selected or the
-  system powers off. The default source selected automatically at power-on
-  is not counted as a selection, but its time on screen is.
+  there. A source stays on screen until another source is selected, its own
+  Stopped event, or the system powers off. The default source selected
+  automatically at power-on is not counted as a selection, but its time on
+  screen is.
 - **Utilization** is system-on time inside business hours (weekdays
   07:00-22:00 by default) divided by the business hours in the range.
 - **Online %** counts the hours in which a room sent a heartbeat or any
   event, but only inside heartbeat coverage, because the server deletes old
   heartbeats. Each room is measured from its first heartbeat or event, and a
-  room that sent no heartbeats has no percentage ("No heartbeats").
+  room that sent no heartbeats has no percentage ("No heartbeats"). A
+  heartbeat gap shows only that nothing was received; the data does not say
+  why.
 - **Issues** are bursts of events within a time window (for example 3
   power-ons in 10 minutes). The thresholds can be changed in Settings. Each
-  issue is a lead to check, not a verdict.
+  issue is a pattern to look at, not a cause or a verdict.
 - **Forecasts** count only hours observed by the metrics system. A device's
   type, and so its rated life, comes from its name unless a device type
   override in Settings says otherwise. They fit a
@@ -291,19 +335,23 @@ IT procurement review (ITPR). In summary:
 - There are colour-blind-safe palettes (Okabe-Ito, deuteranopia, protanopia,
   tritanopia and monochrome) and light, dark and high-contrast themes. All
   text meets 4.5:1 contrast, and chart marks and focus indicators meet 3:1.
-- Headings have levels (page, section, card), so screen reader users can
-  move through each page's outline.
+- Headings have levels (page, section, card, detail), so screen reader users
+  can move through each page's outline. Event recognition's groups (System
+  power, Program start, Sources, Devices, Device type overrides, Controls,
+  Rooms and buildings) are headings too.
 - The app can be used entirely by keyboard. Focus is always visible: controls
   without their own focus outline get an app-wide two-tone focus ring. There
-  is a skip link, focus follows you when a link opens another page, and
-  shortcuts use Ctrl or Cmd. Every target is at least 48 x 48 px.
+  is a skip link, focus follows you when a link opens another page or a
+  Settings section, and shortcuts use Ctrl or Cmd. Every target is at least
+  48 x 48 px.
 - Text can be enlarged to 200% in the app (and further with the operating
   system setting) without losing content. Layouts reflow on narrow windows,
   down to 320 px wide and 256 px high.
 - Reduce motion turns off every app animation. The app also follows the
   operating system's setting.
-- Loading, results counts, errors (including settings field errors), table
-  re-sorts and copy confirmations are announced to screen readers.
+- Loading, results counts, errors (including settings field and list
+  errors), additions and removals in name lists, resets, table re-sorts and
+  copy confirmations are announced to screen readers.
 - On the web each page has its own browser tab title ("Forecast · AV Metrics
   Visualizer"). Desktop windows are titled "AV Metrics Visualizer".
 
@@ -360,8 +408,8 @@ are in [ACCESSIBILITY.md](ACCESSIBILITY.md).
   the app or choose Clear data.
 - **No third-party requests.** The app has no analytics or telemetry. The
   desktop apps connect only to the Analytics API you enter. A web build made
-  with `--no-web-resources-cdn` (the documented build, CI and releases)
-  loads everything from its own site; see
+  with `--no-web-resources-cdn` (the documented build) loads everything from
+  its own site; see
   [Hosting the web build](#hosting-the-web-build) for the one optional
   exception (fallback fonts).
 
@@ -382,14 +430,18 @@ The widget tests run every main screen in light, dark and high-contrast
 themes against Flutter's accessibility guidelines (`textContrastGuideline`,
 `labeledTapTargetGuideline`, `androidTapTargetGuideline`). They also render
 each screen at 100% and 200% text size in narrow (400 px) and wide windows.
+A wording test (`test/ui/wording_test.dart`) scans the UI source for terms
+that assume a particular control program, a support process or what users
+were thinking, so such wording cannot creep back in.
 These automated checks do not replace manual testing with assistive
 technology. See [ACCESSIBILITY.md](ACCESSIBILITY.md#manual-test-procedure).
 
-Continuous integration (`.github/workflows/visualizer-app.yml`) runs
-`flutter analyze`, `flutter test` and a web release build on every change
-under `visualizer_app/`. Pushing a tag named `visualizer-v<version>` runs
-`.github/workflows/visualizer-app-release.yml`, which builds the Windows and
-web releases and attaches them, with checksums, to a GitHub Release.
+Continuous integration (`.github/workflows/visualizer-app.yml`) runs on
+Windows with a pinned Flutter release: `flutter analyze`, `flutter test` and
+`flutter build windows --release` on every change under `visualizer_app/`.
+Pushing a tag named `visualizer-v<version>` runs
+`.github/workflows/visualizer-app-release.yml`, which builds the Windows
+release and attaches it, with checksums, to a GitHub Release.
 
 Project layout:
 
@@ -399,6 +451,6 @@ Project layout:
 | `lib/data/` | Data model, CSV importer, Analytics API client, demo data, token storage. |
 | `lib/state/` | Settings, loaded data and filters, navigation (`provider` ChangeNotifiers). |
 | `lib/ui/theme/` | Themes, chart palettes and patterns, contrast helpers, motion timing. |
-| `lib/ui/widgets/` | Shared accessible widgets: chart card with table view, KPI tile, headings, focus ring overlay, dropdown menu, legend, filter bar, status widgets. |
+| `lib/ui/widgets/` | Shared accessible widgets: chart card with table view, KPI tile, headings, focus ring overlay, dropdown menu, legend, filter bar, form fields, status widgets. |
 | `lib/ui/screens/` | One file per page. `parts/` holds helpers private to some screens. |
 | `test/` | Unit and widget tests, plus fixtures from the production data format. |

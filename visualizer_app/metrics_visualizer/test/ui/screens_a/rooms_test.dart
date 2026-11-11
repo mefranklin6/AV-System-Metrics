@@ -34,7 +34,7 @@ RoomListEntry entry(
     topInput: null,
     issueCounts: {IssueSeverity.info: issues, IssueSeverity.warning: 0, IssueSeverity.critical: 0},
     onlineFraction: null,
-    helpRequests: 0,
+    helpEvents: 0,
     buttonPresses: 0,
   ),
   seen,
@@ -114,8 +114,8 @@ void main() {
       await tester.pump();
       expect(h.navigation.selectedRoom, 'HOLT_155');
       expect(find.text('Room HOLT_155'), findsOneWidget);
-      expect(find.text('Rapid power cycling'), findsNothing); // titles carry the severity prefix
-      expect(find.textContaining('Rapid power cycling'), findsWidgets);
+      expect(find.text('Repeated power cycling'), findsNothing); // titles carry the severity prefix
+      expect(find.textContaining('Repeated power cycling'), findsWidgets);
       final tile = tester.widget<ListTile>(find.widgetWithText(ListTile, 'HOLT_155'));
       expect(tile.selected, isTrue);
     });
@@ -159,15 +159,15 @@ void main() {
         AppDestination.rooms,
         dataset: dataset,
         size: extraWide,
-        room: DemoScenario.deviceLeftOn,
+        room: DemoScenario.longDeviceSession,
       );
       await fitWholePage(tester);
-      expect(find.text('Room ${DemoScenario.deviceLeftOn}'), findsOneWidget);
-      expect(find.text('Video input share in ${DemoScenario.deviceLeftOn}'), findsOneWidget);
-      expect(find.text('Device on-hours in ${DemoScenario.deviceLeftOn}'), findsOneWidget);
-      expect(find.text('When ${DemoScenario.deviceLeftOn} is in use'), findsOneWidget);
-      expect(find.text('Recent issues in ${DemoScenario.deviceLeftOn}'), findsOneWidget);
-      final newest = [...h.app.analysis!.issuesForRoom(DemoScenario.deviceLeftOn)]
+      expect(find.text('Room ${DemoScenario.longDeviceSession}'), findsOneWidget);
+      expect(find.text('Source share in ${DemoScenario.longDeviceSession}'), findsOneWidget);
+      expect(find.text('Device on-hours in ${DemoScenario.longDeviceSession}'), findsOneWidget);
+      expect(find.text('When ${DemoScenario.longDeviceSession} is in use'), findsOneWidget);
+      expect(find.text('Recent issues in ${DemoScenario.longDeviceSession}'), findsOneWidget);
+      final newest = [...h.app.analysis!.issuesForRoom(DemoScenario.longDeviceSession)]
         ..sort((a, b) => b.start.compareTo(a.start));
       if (newest.isNotEmpty) expect(find.textContaining(newest.first.title), findsWidgets);
     });
@@ -187,15 +187,15 @@ void main() {
         AppDestination.rooms,
         dataset: dataset,
         size: extraWide,
-        room: DemoScenario.buttonMashing,
+        room: DemoScenario.repeatedPresses,
       );
       await fitWholePage(tester);
-      final total = h.app.filteredDataset!.events.where((e) => e.clientName == DemoScenario.buttonMashing).length;
+      final total = h.app.filteredDataset!.events.where((e) => e.clientName == DemoScenario.repeatedPresses).length;
       expect(total, greaterThan(500));
       final count = NumberFormatHelper.count(total);
       expect(find.text('$count events'), findsOneWidget);
       expect(
-        find.bySemanticsLabel(RegExp('^Event timeline for ${DemoScenario.buttonMashing}, $total events')),
+        find.bySemanticsLabel(RegExp('^Event timeline for ${DemoScenario.repeatedPresses}, $total events')),
         findsOneWidget,
       );
 
@@ -222,14 +222,14 @@ void main() {
       await tester.pump();
       expect(position.pixels, 0);
 
-      // Filter to touch-panel traces only.
+      // Filter to control traces only.
       tester.widget<DropdownMenu<EventCategory?>>(find.byType(DropdownMenu<EventCategory?>)).onSelected!(
         EventCategory.uiTrace,
       );
       await tester.pump();
-      expect(find.textContaining(RegExp(r'^[\d,]+ events in Touch panel$')), findsOneWidget);
-      expect(find.textContaining('· Touch panel'), findsWidgets);
-      expect(find.textContaining('· Video input'), findsNothing);
+      expect(find.textContaining(RegExp(r'^[\d,]+ events in Control$')), findsOneWidget);
+      expect(find.textContaining('· Control'), findsWidgets);
+      expect(find.textContaining('· Source'), findsNothing);
       handle.dispose();
     });
 

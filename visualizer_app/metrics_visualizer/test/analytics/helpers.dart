@@ -108,3 +108,19 @@ Dataset productionSampleDataset() {
   ];
   return ds(events, heartbeats: buckets);
 }
+
+/// (metric, action) of each data row of
+/// `test/fixtures/production_sample_psql.txt` (psql's aligned output).
+List<(String, String)> readProductionPsqlRows() {
+  final lines = File('test/fixtures/production_sample_psql.txt')
+      .readAsLinesSync()
+      .where((l) => l.contains('|'))
+      .toList();
+  final header = [for (final c in lines.first.split('|')) c.trim()];
+  final mi = header.indexOf('metric'), ai = header.indexOf('action');
+  return [
+    for (final line in lines.skip(1))
+      if (line.split('|').length == header.length)
+        (line.split('|')[mi].trim(), line.split('|')[ai].trim()),
+  ];
+}

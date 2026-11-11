@@ -24,8 +24,8 @@ RoomSessions build(
   );
 }
 
-DateTime at(int hour, [int minute = 0]) =>
-    monday.add(Duration(hours: hour, minutes: minute));
+DateTime at(int hour, [int minute = 0, int second = 0]) =>
+    monday.add(Duration(hours: hour, minutes: minute, seconds: second));
 
 void main() {
   group('system sessions', () {
@@ -54,21 +54,43 @@ void main() {
       expect(s.system.single.offReason, OffReason.inactivity);
     });
 
-    test('Scheduled and GVE stops', () {
+    test('reason groups, synonyms and verbatim other reasons', () {
       final s = build([
-        ev(room, at(8), 'System - GVE', 'Started'),
-        ev(room, at(9), 'System - GVE', 'Stopped'),
+        ev(room, at(8), 'System Power - Remote', 'Started'),
+        ev(room, at(9), 'System Power - Remote', 'Stopped'),
         ev(room, at(10), 'System - Restore', 'Started'),
-        ev(room, at(22), 'System - Scheduled', 'Stopped'),
+        ev(room, at(11), 'System - Scheduled', 'Stopped'),
+        ev(room, at(12), 'System - GVE', 'Started'),
+        ev(room, at(13), 'System - GVE', 'Stopped'),
+        ev(room, at(14), 'System Power', 'Started'),
+        ev(room, at(15), 'System Power - Idle', 'Stopped'),
+        ev(room, at(16), 'System Power - Schedule', 'Started'),
+        ev(room, at(17), 'System Power', 'Stopped'),
       ]);
       expect(
         [for (final x in s.system) x.offReason],
-        [OffReason.remote, OffReason.scheduled],
+        [
+          OffReason.remote,
+          OffReason.scheduled,
+          OffReason.other,
+          OffReason.inactivity,
+          OffReason.unknown,
+        ],
       );
       expect(
         [for (final x in s.system) x.startSource],
-        [PowerSource.remote, PowerSource.restore],
+        [
+          PowerSource.remote,
+          PowerSource.restore,
+          PowerSource.other,
+          PowerSource.unknown,
+          PowerSource.scheduled,
+        ],
       );
+      expect(s.system[2].startReason, 'GVE');
+      expect(s.system[2].offReasonText, 'GVE');
+      expect(s.system[3].offReasonText, 'Idle');
+      expect(s.system[4].offReasonText, isNull);
     });
 
     test('missing stop is capped and flagged unterminated', () {
@@ -116,17 +138,30 @@ void main() {
       expect(s.devices, hasLength(1));
     });
 
-    test('User Reset keeps the session and counts as a power-on', () {
+    test('a Started while on (such as a reset) is a marker only', () {
       final s = build([
         ev(room, at(9), 'System - User', 'Started'),
-        ev(room, at(9, 10), 'System - User Reset', 'Stopped'),
         ev(room, at(9, 11), 'System - User Reset', 'Started'),
         ev(room, at(10), 'System - User', 'Stopped'),
       ]);
       expect(s.system, hasLength(1));
       expect(s.system.single.hours, 1);
-      expect(s.powerOnEvents, hasLength(2));
-      expect(s.duplicateStarts, 0);
+      expect(s.powerOnEvents, hasLength(1));
+      expect(s.duplicateStarts, 1);
+    });
+
+    test('Program Start closes an open session (recommended names)', () {
+      final s = build([
+        ev(room, at(9), 'System Power - User', 'Started'),
+        ev(room, at(9), 'Projector 1', 'Started'),
+        ev(room, at(10), 'Program Start', 'Started'),
+        ev(room, at(10, 1), 'System Power - Restore', 'Started'),
+        ev(room, at(11), 'System Power - User', 'Stopped'),
+      ]);
+      expect(s.reboots, 1);
+      expect([for (final x in s.system) x.offReason], [OffReason.reinitialized, OffReason.user]);
+      expect(s.system[1].startSource, PowerSource.restore);
+      expect(s.devices.single.endKind, SessionEnd.reinitialized);
     });
 
     test('startup trace opens and shutdown trace closes when needed', () {
@@ -328,6 +363,44 @@ void main() {
       );
     });
 
+    test('prefixed sources, Trace selections and an explicit Stopped', () {
+      final s = build([
+        ev(room, at(9), 'System Power - User', 'Started'),
+        ev(room, at(9, 30), 'Source - HDMI 1', 'Started'),
+        ev(room, at(10), 'Source - HDMI 1', 'Stopped'),
+        ev(room, at(10, 30), 'Input: Wireless', 'Trace'),
+        ev(room, at(10, 45), 'Source - HDMI 1', 'Stopped'), // not on screen
+        ev(room, at(11), 'System Power - User', 'Stopped'),
+      ]);
+      expect(
+        [for (final i in s.inputs) (i.inputLabel, i.hours, i.endKind)],
+        [
+          ('HDMI 1', 0.5, SessionEnd.stopped),
+          ('Wireless', 0.5, SessionEnd.systemOff),
+        ],
+      );
+    });
+
+    test('automatic default source: within 15 s or before startup complete', () {
+      final s = build([
+        ev(room, at(9), 'System Power', 'Started'),
+        ev(room, at(9, 0, 14), 'Source - PC', 'Started'),
+        ev(room, at(9, 5), 'Source - HDMI', 'Started'),
+        ev(room, at(10), 'System Power', 'Stopped'),
+        ev(room, at(11), 'System Power', 'Started'),
+        ev(room, at(11, 0, 40), 'Source - PC', 'Started'),
+        ev(room, at(11, 0, 50), 'System Startup Complete', 'Trace'),
+        ev(room, at(12), 'System Power', 'Stopped'),
+        ev(room, at(13), 'System Power', 'Started'),
+        ev(room, at(13, 0, 20), 'Source - PC', 'Started'),
+        ev(room, at(14), 'System Power', 'Stopped'),
+      ]);
+      expect(
+        [for (final e in s.automaticInputStarts) e.timestamp],
+        unorderedEquals([at(9, 0, 14), at(11, 0, 40)]),
+      );
+    });
+
     test('re-selecting the same input continues the session', () {
       final s = build([
         ev(room, at(9), 'pc', 'Started'),
@@ -360,8 +433,8 @@ void main() {
       expect(
         [for (final m in s.mutes) (m.name, m.hours, m.endKind)],
         [
-          ('Microphone Muted', 0.25, SessionEnd.stopped),
-          ('Program Audio Muted', 0.5, SessionEnd.systemOff),
+          ('Microphone', 0.25, SessionEnd.stopped),
+          ('Program Audio', 0.5, SessionEnd.systemOff),
         ],
       );
     });

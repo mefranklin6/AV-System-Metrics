@@ -89,122 +89,329 @@ void main() {
         );
       }
     });
+
+    test('the psql fixture classifies the same way', () {
+      final lines = readProductionPsqlRows();
+      expect(lines, isNotEmpty);
+      for (final (metric, action) in lines) {
+        expect(
+          classifier.classify(metric, action).category,
+          isNot(EventCategory.other),
+          reason: '$metric $action',
+        );
+      }
+    });
   });
 
-  group('parsed fields', () {
+  // Every row of the "Event conventions" table in Implementation_Guide.md,
+  // recommended and also-recognized forms.
+  group('Implementation guide: event conventions', () {
+    final c = MetricClassifier();
+    ClassifiedMetric k(String metric, String action) =>
+        c.classify(metric, action);
+
+    test('room system powered on / off', () {
+      for (final metric in [
+        'System Power',
+        'System',
+        'System Power - User',
+        'System - User',
+        'system power - schedule',
+        '  System -Inactivity ',
+      ]) {
+        for (final (action, start) in [('Started', true), ('Stopped', false)]) {
+          final m = k(metric, action);
+          expect(m.category, EventCategory.systemPower, reason: metric);
+          expect(m.isStart, start, reason: '$metric $action');
+          expect(m.isStop, !start, reason: '$metric $action');
+        }
+      }
+      expect(k('System Power', 'Started').powerSource, PowerSource.unknown);
+      expect(k('System Power', 'Started').powerReason, isNull);
+      expect(k('System Power', 'Trace').category, EventCategory.other);
+      expect(k('Systems - User', 'Started').category, isNot(EventCategory.systemPower));
+    });
+
+    test('power reasons: five groups with synonyms, others verbatim', () {
+      PowerSource? src(String m) => k(m, 'Stopped').powerSource;
+      expect(src('System Power - User'), PowerSource.user);
+      expect(src('System Power - Manual'), PowerSource.user);
+      expect(src('System Power - Schedule'), PowerSource.scheduled);
+      expect(src('System - Scheduled'), PowerSource.scheduled);
+      expect(src('System Power - Inactivity'), PowerSource.inactivity);
+      expect(src('System Power - Idle'), PowerSource.inactivity);
+      expect(src('System Power - Timeout'), PowerSource.inactivity);
+      expect(src('System Power - Remote'), PowerSource.remote);
+      expect(src('System Power - Restore'), PowerSource.restore);
+      expect(src('System Power - Recovery'), PowerSource.restore);
+      final gve = k('System - GVE', 'Started');
+      expect(gve.powerSource, PowerSource.other);
+      expect(gve.powerReason, 'GVE');
+      final reset = k('System - User Reset', 'Started');
+      expect(reset.powerSource, PowerSource.other);
+      expect(reset.powerReason, 'User Reset');
+    });
+
+    test('source routed to the main display(s)', () {
+      for (final (metric, name) in [
+        ('Source - HDMI 1', 'HDMI 1'),
+        ('Source: Lectern PC', 'Lectern PC'),
+        ('Source Select: HDMI 1', 'HDMI 1'),
+        ('Input - Document Camera', 'Document Camera'),
+        ('Input: Wireless', 'Wireless'),
+        ('source-hdmi 1', 'hdmi 1'),
+        ('Source - Display 2 - HDMI 1', 'Display 2 - HDMI 1'),
+      ]) {
+        for (final action in ['Started', 'Trace']) {
+          final m = k(metric, action);
+          expect(m.category, EventCategory.input, reason: '$metric $action');
+          expect(m.isSourceSelection, isTrue, reason: '$metric $action');
+          expect(m.inputLabel, name, reason: metric);
+          expect(m.inputKey, name.toLowerCase(), reason: metric);
+        }
+        final stop = k(metric, 'Stopped');
+        expect(stop.category, EventCategory.input);
+        expect(stop.isSourceSelection, isFalse);
+        expect(stop.isStop, isTrue);
+      }
+      final bare = k('hdmi', 'Started');
+      expect(bare.category, EventCategory.input);
+      expect(bare.inputLabel, 'HDMI');
+      expect(k('doc_cam', 'Started').inputLabel, 'Document Camera');
+      // The same source name merges across naming styles.
+      expect(
+        k('doc_cam', 'Started').inputKey,
+        k('Source - Document Camera', 'Started').inputKey,
+      );
+    });
+
+    test('device powered on / off', () {
+      for (final (metric, type, n) in [
+        ('Projector 1', 'PROJECTOR', 1),
+        ('Projector_1', 'PROJECTOR', 1),
+        ('Display 1 Power', 'DISPLAY', 1),
+        ('Projector Power', 'PROJECTOR', null),
+        ('Laser Projector 2', 'LASER PROJECTOR', 2),
+        ('Camera_12', 'CAMERA', 12),
+      ]) {
+        final on = k(metric, 'Started');
+        expect(on.category, EventCategory.device, reason: metric);
+        expect(on.deviceType, type, reason: metric);
+        expect(on.deviceNumber, n, reason: metric);
+        expect(on.deviceId, metric);
+        expect(k(metric, 'Stopped').isStop, isTrue);
+      }
+      expect(k('Projector 1', 'Trace').category, EventCategory.other);
+    });
+
+    test('device communication up / down', () {
+      final up = k('Projector 1', 'Connected');
+      expect(up.category, EventCategory.connection);
+      expect(up.connected, isTrue);
+      expect(up.connectionTarget, 'Projector 1');
+      expect(k('Any metric at all', 'Disconnected').connected, isFalse);
+    });
+
+    test('control program started', () {
+      for (final metric in [
+        'Program Start',
+        'Initialize',
+        'Program Started',
+        'Processor Boot',
+      ]) {
+        for (final action in ['Started', 'Trace']) {
+          final m = k(metric, action);
+          expect(m.category, EventCategory.lifecycle, reason: '$metric $action');
+          expect(m.lifecycle, LifecycleKind.programStart, reason: metric);
+        }
+      }
+      expect(
+        k('Initialize', 'Stopped').lifecycle,
+        LifecycleKind.programStartStopped,
+      );
+    });
+
+    test('startup / shutdown complete (optional)', () {
+      for (final m in ['System Startup Complete', 'System Startup Sequence Complete']) {
+        expect(k(m, 'Trace').lifecycle, LifecycleKind.startupComplete);
+      }
+      for (final m in ['System Shutdown Complete', 'System Shutdown Sequence Complete']) {
+        expect(k(m, 'Trace').lifecycle, LifecycleKind.shutdownComplete);
+      }
+    });
+
+    test('touch-panel or keypad control used; only Pressed is a press', () {
+      for (final (word, kind) in [
+        ('Pressed', UiEventKind.pressed),
+        ('Released', UiEventKind.released),
+        ('Tapped', UiEventKind.tapped),
+        ('Held', UiEventKind.held),
+        ('Repeated', UiEventKind.repeated),
+      ]) {
+        final m = k('Camera Preset 2 $word', 'Trace');
+        expect(m.category, EventCategory.uiTrace);
+        expect(m.controlName, 'Camera Preset 2');
+        expect(m.uiEvent, kind);
+        expect(m.isPress, kind == UiEventKind.pressed);
+      }
+      expect(k('Hello World!', 'Trace').category, EventCategory.other);
+    });
+
+    test('audio muted / unmuted', () {
+      for (final (metric, action, start) in [
+        ('Program Audio Mute', 'Started', true),
+        ('Program Audio Mute', 'Stopped', false),
+        ('Program Audio Muted', 'Started', true),
+        ('Program Audio', 'Muted', true),
+        ('Program Audio', 'Unmuted', false),
+      ]) {
+        final m = k(metric, action);
+        expect(m.category, EventCategory.mute, reason: '$metric $action');
+        expect(m.muteName, 'Program Audio', reason: '$metric $action');
+        expect(m.isStart, start);
+      }
+    });
+
+    test('volume set', () {
+      final v = k('Program Audio Volume', 'Level 40');
+      expect(v.category, EventCategory.volume);
+      expect(v.volumeLevel, 40);
+      expect(v.volumeDb, isNull);
+      final legacy = k('Program Audio Volume', 'Level 31 (Device -18.8)');
+      expect(legacy.volumeLevel, 31);
+      expect(legacy.volumeDb, -18.8);
+      expect(k('Mic Volume', 'Level 12 any text').volumeLevel, 12);
+    });
+
+    test('wireless share keeps the metric verbatim', () {
+      final s = k('NAV Share - Station 4', 'Share');
+      expect(s.category, EventCategory.share);
+      expect(s.shareStation, 'NAV Share - Station 4');
+      expect(k('Room 101 Wireless', 'Share').shareStation, 'Room 101 Wireless');
+    });
+
+    test('heartbeat', () {
+      expect(k('Ok', 'Heartbeat').category, EventCategory.heartbeat);
+    });
+
+    test('anything else is kept as other', () {
+      expect(k('Lights Scene 3', 'Trace').category, EventCategory.other);
+      expect(k('Anything', 'SomeCustomAction').category, EventCategory.other);
+    });
+  });
+
+  group('Developer Guide examples', () {
     final c = MetricClassifier();
 
-    test('devices', () {
-      final p = c.classify('Projector_2', 'Stopped');
-      expect(p.deviceType, 'PROJECTOR');
-      expect(p.deviceNumber, 2);
-      expect(p.deviceId, 'Projector_2');
-      expect(p.isStop, isTrue);
-      final cam = c.classify('Camera_1', 'Started');
-      expect(cam.deviceType, 'CAMERA');
-      expect(cam.isStart, isTrue);
-      expect(c.classify('Display_3', 'Started').deviceType, 'DISPLAY');
-      expect(c.classify('Projector_1', 'Trace').category, EventCategory.other);
+    test('System Power, Source Select, Display Power, Microphone Mute', () {
+      expect(c.classify('System Power', 'Started').category, EventCategory.systemPower);
+      final src = c.classify('Source Select: HDMI 1', 'Started');
+      expect(src.category, EventCategory.input);
+      expect(src.inputLabel, 'HDMI 1');
+      final disp = c.classify('Display 1 Power', 'Started');
+      expect(disp.category, EventCategory.device);
+      expect(disp.deviceType, 'DISPLAY');
+      final mic = c.classify('Microphone 1 Mute', 'Started');
+      expect(mic.category, EventCategory.mute);
+      expect(mic.muteName, 'Microphone 1');
+      // custom("Muted", "Microphone 1"): action Muted, metric Microphone 1.
+      final custom = c.classify('Microphone 1', 'Muted');
+      expect(custom.category, EventCategory.mute);
+      expect(custom.muteName, 'Microphone 1');
+      expect(custom.isStart, isTrue);
+    });
+  });
+
+  group('help-labelled events', () {
+    final c = MetricClassifier();
+
+    test('any action, word "help" anywhere in the metric', () {
+      for (final (metric, action) in [
+        ('Help', 'Started'),
+        ('Help', 'Stopped'),
+        ('Help Pressed', 'Trace'),
+        ('Btn_Help Pressed', 'Trace'),
+        ('Call For Help', 'Requested'),
+        ('HELP-Button', 'Connected'),
+      ]) {
+        expect(
+          c.classify(metric, action).category,
+          EventCategory.help,
+          reason: '$metric $action',
+        );
+      }
+      final press = c.classify('Help Pressed', 'Trace');
+      expect(press.controlName, 'Help');
+      expect(press.isPress, isTrue);
+      expect(c.classify('Helper Display', 'Trace').category, EventCategory.other);
+      expect(c.classify('Btn_Helpful Pressed', 'Trace').category, EventCategory.uiTrace);
+    });
+  });
+
+  group('control name patterns', () {
+    final c = MetricClassifier();
+
+    test('navigation: Nav, Navigation, Page, Menu, Tab, Back, Home parts', () {
+      for (final name in [
+        'Btn_Inst_Cam_Nav',
+        'Btn_Nav_Display',
+        'Navigation',
+        'Camera Page',
+        'Btn_Start_Page',
+        'Main Menu',
+        'Settings-Tab',
+        'Back',
+        'Btn_Back',
+        'Home',
+      ]) {
+        expect(c.classify('$name Pressed', 'Trace').isNavigation, isTrue, reason: name);
+      }
+      for (final name in ['Btn_Backlight', 'Table Lights', 'Homeroom', 'Volume Up']) {
+        expect(c.classify('$name Pressed', 'Trace').isNavigation, isFalse, reason: name);
+      }
     });
 
-    test('volume', () {
-      final v = c.classify('Program Audio Volume', 'Level 50 (Device -20.0)');
-      expect(v.volumeLevel, 50);
-      expect(v.volumeDb, -20.0);
-      expect(v.volumeName, 'Program Audio Volume');
-      final m = c.classify('Microphone Volume', 'Level 7');
-      expect(m.category, EventCategory.volume);
-      expect(m.volumeLevel, 7);
-      expect(m.volumeDb, isNull);
+    test('repeatable and slider controls by generic words', () {
+      for (final name in [
+        'Volume Up',
+        'Btn_Volume_Down',
+        'Vol Up',
+        'Camera Zoom In',
+        'Cam Pan Left',
+        'Tilt',
+        'Focus Out',
+        'Btn_Cam_Right',
+      ]) {
+        expect(c.classify('$name Pressed', 'Trace').isRepeatable, isTrue, reason: name);
+      }
+      for (final name in ['Sldr_Volume', 'Mic Fader', 'Volume Slider']) {
+        final m = c.classify('$name Pressed', 'Trace');
+        expect(m.isSlider, isTrue, reason: name);
+        expect(m.isRepeatable, isTrue, reason: name);
+      }
+      expect(c.classify('Video Mute Pressed', 'Trace').isRepeatable, isFalse);
+      expect(c.classify('Btn_Upload Pressed', 'Trace').isRepeatable, isFalse);
     });
+  });
 
-    test('ui traces', () {
-      final nav = c.classify('Btn_Inst_Cam_Nav Pressed', 'Trace');
-      expect(nav.controlName, 'Btn_Inst_Cam_Nav');
-      expect(nav.uiEvent, UiEventKind.pressed);
-      expect(nav.isNavigation, isTrue);
-      expect(nav.isPress, isTrue);
-      final tap = c.classify('Btn_Volume_Up Tapped', 'Trace');
-      expect(tap.uiEvent, UiEventKind.tapped);
-      expect(tap.isPress, isFalse);
-      expect(tap.isRepeatable, isTrue);
-      expect(tap.isNavigation, isFalse);
-      final mute = c.classify('Btn_Volume_Mute Pressed', 'Trace');
-      expect(mute.isRepeatable, isFalse);
-      final sl = c.classify('Sldr_Volume Released', 'Trace');
-      expect(sl.isSlider, isTrue);
-      expect(sl.uiEvent, UiEventKind.released);
-      expect(c.classify('Btn_Back Held', 'Trace').uiEvent, UiEventKind.held);
-      expect(c.classify('Btn_Back Repeated', 'Trace').isNavigation, isTrue);
-      expect(c.classify('Btn_Home_Page Pressed', 'Trace').isNavigation, isTrue);
-      expect(c.classify('Hello World!', 'Trace').category, EventCategory.other);
-    });
+  group('other parsed fields', () {
+    final c = MetricClassifier();
 
-    test('system power and lifecycle', () {
-      PowerSource? src(String m, String a) => c.classify(m, a).powerSource;
-      expect(src('System - User', 'Started'), PowerSource.user);
-      expect(src('System - Inactivity', 'Stopped'), PowerSource.inactivity);
-      expect(src('System - Scheduled', 'Stopped'), PowerSource.scheduled);
-      expect(src('System - Restore', 'Started'), PowerSource.restore);
-      expect(src('System - GVE', 'Stopped'), PowerSource.remote);
-      expect(src('System - User Reset', 'Started'), PowerSource.userReset);
-      expect(src('System - Something', 'Started'), PowerSource.unknown);
-      LifecycleKind? lc(String m, String a) => c.classify(m, a).lifecycle;
-      expect(lc('Initialize', 'Started'), LifecycleKind.initializeStarted);
-      expect(lc('Initialize', 'Stopped'), LifecycleKind.initializeStopped);
-      expect(
-        lc('System Startup Sequence Complete', 'Trace'),
-        LifecycleKind.startupComplete,
-      );
-      expect(
-        lc('System Shutdown Sequence Complete', 'Trace'),
-        LifecycleKind.shutdownComplete,
-      );
-      expect(lc('System Restored', 'Trace'), LifecycleKind.restored);
-    });
-
-    test('inputs are normalised with display labels', () {
+    test('bare source names are normalised with display labels', () {
       final pc = c.classify('pc', 'Started');
       expect(pc.inputKey, 'pc');
       expect(pc.inputLabel, 'PC');
       expect(c.classify('VGA', 'Started').inputKey, 'vga');
-      expect(c.classify('doc_cam', 'Started').inputLabel, 'Document Camera');
       expect(c.classify('Custom_Input', 'Started').inputLabel, 'Custom Input');
-      final st = c.classify('station_12_laptop', 'Started');
-      expect(st.category, EventCategory.input);
-      expect(st.inputLabel, 'Station 12 Laptop');
+      expect(c.classify('station_2_laptop', 'Started').inputLabel, 'Station 2 Laptop');
       expect(c.classify('blu_ray', 'Started').inputLabel, 'Blu-ray');
-      expect(c.classify('pc', 'Stopped').isStop, isTrue);
-      expect(
-        c.classify('not_an_input', 'Started').category,
-        EventCategory.other,
-      );
       expect(MetricClassifier.inputLabelFor('my_new_input'), 'My New Input');
-    });
-
-    test('help, mutes, share, connections, custom', () {
-      expect(c.classify('Help', 'Started').category, EventCategory.help);
-      final mute = c.classify('VoiceLift In-Room Muted', 'Started');
-      expect(mute.category, EventCategory.mute);
-      expect(mute.muteName, 'VoiceLift In-Room Muted');
-      final share = c.classify('NAV Share - Station 4', 'Share');
-      expect(share.category, EventCategory.share);
-      expect(share.shareStation, 'Station 4');
-      final conn = c.classify('Projector_1', 'Connected');
-      expect(conn.category, EventCategory.connection);
-      expect(conn.connected, isTrue);
-      expect(conn.connectionTarget, 'Projector_1');
-      expect(c.classify('Switcher', 'Disconnected').connected, isFalse);
-      expect(
-        c.classify('Anything', 'SomeCustomAction').category,
-        EventCategory.other,
-      );
     });
 
     test('buildings are upper-cased prefixes', () {
       expect(c.buildingOf('BSS_245'), 'BSS');
       expect(c.buildingOf('Holt_171'), 'HOLT');
-      expect(c.buildingOf('HOLT_155'), 'HOLT');
+      expect(c.buildingOf('SCI-101'), 'SCI');
       expect(c.buildingOf('AJH_125A'), 'AJH');
       expect(c.buildingOf('123'), '123');
     });
@@ -233,24 +440,53 @@ void main() {
       const ClassifierConfig(
         devicePattern: '(unclosed',
         navigationButtonPattern: '[bad',
+        helpPattern: '(',
       ),
     );
-    expect(c.warnings, hasLength(2));
+    expect(c.warnings, hasLength(3));
     expect(c.classify('Projector_1', 'Started').category, EventCategory.device);
     expect(c.classify('Btn_Back Pressed', 'Trace').isNavigation, isTrue);
+    expect(c.classify('Help', 'Started').category, EventCategory.help);
   });
 
-  test('custom input names and device pattern are honoured', () {
+  test('every name list and pattern is configurable', () {
     final c = MetricClassifier(
       const ClassifierConfig(
+        systemPowerNames: ['Room Power'],
+        powerReasonSynonyms: {
+          'user': ['Panel'],
+          'scheduled': ['Nightly'],
+        },
+        sourcePrefixes: ['Route >'],
         inputNames: ['apple_tv'],
         devicePattern: r'^(Amp)_(\d+)$',
+        programStartNames: ['Boot'],
+        startupCompleteNames: ['Ready'],
+        shutdownCompleteNames: ['Asleep'],
+        navigationButtonPattern: r'^Go ',
+        repeatableControlPattern: r'Spin',
+        helpPattern: r'assist',
       ),
     );
-    expect(c.classify('Apple_TV', 'Started').inputKey, 'apple_tv');
+    expect(c.classify('Room Power - Panel', 'Started').powerSource, PowerSource.user);
+    expect(c.classify('Room Power - Nightly', 'Stopped').powerSource, PowerSource.scheduled);
+    expect(c.classify('Room Power - User', 'Stopped').powerSource, PowerSource.other);
+    expect(c.classify('System Power', 'Started').category, isNot(EventCategory.systemPower));
+    expect(c.classify('Route > Laptop', 'Started').inputLabel, 'Laptop');
+    expect(c.classify('Source - HDMI', 'Started').category, isNot(EventCategory.input));
+    expect(c.classify('Apple_TV', 'Started').inputKey, 'apple tv');
     expect(c.classify('pc', 'Started').category, EventCategory.other);
     final amp = c.classify('Amp_3', 'Started');
     expect(amp.deviceType, 'AMP');
     expect(amp.deviceNumber, 3);
+    expect(c.classify('Projector 1', 'Started').category, EventCategory.other);
+    expect(c.classify('Boot', 'Trace').lifecycle, LifecycleKind.programStart);
+    expect(c.classify('Ready', 'Trace').lifecycle, LifecycleKind.startupComplete);
+    expect(c.classify('Asleep', 'Trace').lifecycle, LifecycleKind.shutdownComplete);
+    expect(c.classify('Go Home Pressed', 'Trace').isNavigation, isTrue);
+    expect(c.classify('Back Pressed', 'Trace').isNavigation, isFalse);
+    expect(c.classify('Spin Pressed', 'Trace').isRepeatable, isTrue);
+    expect(c.classify('Assist Pressed', 'Trace').category, EventCategory.help);
+    expect(c.classify('Help', 'Started').category, isNot(EventCategory.help));
   });
 }

@@ -73,7 +73,7 @@ void main() {
     await pumpFrames(tester);
     expect(t.navigation.current, AppDestination.about);
     expect(find.byType(AboutScreen), findsOneWidget);
-    await tester.tap(find.text('Inputs'));
+    await tester.tap(find.text('Sources'));
     await pumpFrames(tester);
     expect(t.navigation.current, AppDestination.inputs);
   });

@@ -66,11 +66,11 @@ void main() {
         case AppDestination.devices:
           expect(find.text('No device activity in this period'), findsOneWidget);
         case AppDestination.inputs:
-          expect(find.textContaining('No video input was selected in all rooms'), findsWidgets);
+          expect(find.textContaining('No source selections were logged in all rooms'), findsWidgets);
         case AppDestination.systemUsage:
           expect(find.textContaining('No power-ons were recorded'), findsOneWidget);
         case AppDestination.overview:
-          expect(find.textContaining('No potential issues were detected'), findsOneWidget);
+          expect(find.textContaining('No patterns were found'), findsOneWidget);
         case _:
           expect(find.text('Room HB_100'), findsOneWidget);
       }

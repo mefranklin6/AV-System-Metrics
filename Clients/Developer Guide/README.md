@@ -4,7 +4,7 @@ Use this guide when writing a client module for another AV control platform, scr
 
 The included [Extron ECS Python client](/Clients/Extron%20ECS/metrics_client.py) is the reference implementation. The server-side contract comes from [AWS_Serverless/lambda_function.py](/AWS_Serverless/lambda_function.py) and [Self_Hosted/main.go](/Self_Hosted/main.go).
 
-This guide covers sending metrics. To build an app that reads the stored data back, use the optional, read-only [Analytics API](/Self_Hosted/analytics_api/README.md) of the self-hosted system instead; it has its own token and its own documentation.
+This guide covers sending metrics. For which events a control program should log and how to name them, see the [Implementation Guide](/Implementation_Guide.md). To build an app that reads the stored data back, use the optional, read-only [Analytics API](/Self_Hosted/analytics_api/README.md) of the self-hosted system instead; it has its own token and its own documentation.
 
 ## Network Contract
 

@@ -106,12 +106,12 @@ void main() {
       expect(insights, isNotEmpty);
       expect(insights.length, lessThanOrEqualTo(10));
       expect(insights.first.kind, InsightKind.attention);
-      // The least used input is named first with its room count and share.
-      final rare = insights.firstWhere((i) => i.text.contains('candidate for removal'));
-      expect(rare.text, startsWith('DVD was selected in 1 of 24 rooms ('));
+      // The least used source is named first with its room count and share.
+      final rare = insights.firstWhere((i) => i.text.contains('least-used sources'));
+      expect(rare.text, startsWith('Blu-ray was selected in 1 of 24 rooms ('));
       expect(rare.destination, AppDestination.inputs);
-      expect(insights.any((i) => i.kind == InsightKind.energy && i.text.contains('inactivity auto-off')), isTrue);
-      expect(insights.any((i) => i.kind == InsightKind.training), isTrue);
+      expect(insights.any((i) => i.kind == InsightKind.energy && i.text.contains('inactivity power-off')), isTrue);
+      expect(insights.any((i) => i.kind == InsightKind.pattern), isTrue);
       for (final i in insights) {
         expect(i.destination, isNotNull, reason: i.text);
         expect(i.text, isNot(contains('null')));
@@ -133,7 +133,7 @@ void main() {
     test('a quiet dataset produces no misleading claims', () {
       final quiet = analyze(heartbeatOnlyDataset(), const AnalysisConfig(useLocalTime: false));
       final insights = buildInsights(quiet);
-      expect(insights.where((i) => i.text.contains('candidate for removal')), isEmpty);
+      expect(insights.where((i) => i.text.contains('least-used sources')), isEmpty);
       expect(insights.where((i) => i.kind == InsightKind.energy), isEmpty);
     });
   });

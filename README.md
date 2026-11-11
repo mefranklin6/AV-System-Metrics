@@ -51,7 +51,11 @@ There are currently two hosting systems that will support any AV controller or d
 
 ### Build your own
 
-Don't see your system here? Consider making one with the included [Developer Guide](/Clients/Developer%20Guide/README.md)
+Don't see your system here? Consider making one with the included [Developer Guide](/Clients/Developer%20Guide/README.md).
+
+### What to log
+
+The [Implementation Guide](/Implementation_Guide.md) describes which events to log and how to name them, on any control platform, so data is comparable across rooms and the Metrics Visualizer can analyze it.
 
 ### Future Support
 

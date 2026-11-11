@@ -2,7 +2,7 @@
 
 Use the client module that matches your AV platform, import it into your existing program, and add metric calls around the logic you already have.
 
-See each platform folder for setup instructions and example code.
+See each platform folder for setup instructions and example code. For which events to log and how to name them, see the [Implementation Guide](/Implementation_Guide.md).
 
 ## Basic Flow
 

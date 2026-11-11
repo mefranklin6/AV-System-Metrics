@@ -21,7 +21,7 @@ void main() {
     // Retention days from the data source are shown.
     expect(find.textContaining('keeps heartbeats for ${c.retentionDays} days'), findsWidgets);
     // Flapping devices are called out in words.
-    expect(find.textContaining('unstable connection'), findsWidgets);
+    expect(find.textContaining('changed connection state repeatedly'), findsWidgets);
     await scrollTo(tester, find.text('Processor online time per room'));
     expect(find.byType(LabeledBarList), findsOneWidget);
     // The chart summary mentions the lowest room.

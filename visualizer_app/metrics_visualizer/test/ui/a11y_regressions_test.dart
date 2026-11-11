@@ -334,7 +334,7 @@ void main() {
     testWidgets('removing a chip keeps focus in the list and announces it', (tester) async {
       await pumpApp(tester, initial: AppDestination.settings);
       final chips = find.descendant(
-        of: find.byWidgetPredicate((w) => w is StringListEditor && w.label == 'Video input names'),
+        of: find.byWidgetPredicate((w) => w is StringListEditor && w.label == 'Source names'),
         matching: find.byType(InputChip),
       );
       await reveal(tester, chips);
@@ -382,13 +382,13 @@ void main() {
       tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(supportsAnnounce: true);
       addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
       await pumpApp(tester, initial: AppDestination.settings);
-      final field = find.widgetWithText(TextField, 'Rapid power cycling: events');
+      final field = find.widgetWithText(TextField, 'Repeated power cycling: events');
       await reveal(tester, field);
       tester.takeAnnouncements();
       await tester.enterText(field, '99999');
       await tester.pump();
       expect([for (final a in tester.takeAnnouncements()) a.message],
-          contains('Rapid power cycling: events: Must be from 2 to 1000.'));
+          contains('Repeated power cycling: events: Must be from 2 to 1000.'));
       // The same error is not repeated on every keystroke.
       await tester.enterText(field, '999999');
       await tester.pump();

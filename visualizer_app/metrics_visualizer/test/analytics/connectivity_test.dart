@@ -75,7 +75,7 @@ void main() {
     expect(b.coveredHours, 0);
     expect(b.offlinePeriods, isEmpty);
     expect(b.dailyOnline, isEmpty);
-    expect(r.issues.where((i) => i.type == IssueType.offlineRoom), isEmpty);
+    expect(r.issues.where((i) => i.type == IssueType.heartbeatGap), isEmpty);
     expect(r.connectivity.coverageNote, contains('1 room sent no heartbeats'));
   });
 

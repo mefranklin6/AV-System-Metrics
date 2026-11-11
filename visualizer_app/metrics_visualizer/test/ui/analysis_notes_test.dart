@@ -21,7 +21,7 @@ import 'package:metrics_visualizer/ui/widgets/widgets.dart';
 import 'screens_b/screens_b_helpers.dart';
 
 /// Tall enough for the whole Settings page, including the last cards.
-const Size settingsTall = Size(1400, 9000);
+const Size settingsTall = Size(1400, 14000);
 const Size tall = Size(1400, 4000);
 
 Finder textField(String label) => find.ancestor(of: find.text(label), matching: find.byType(TextField)).first;
@@ -84,7 +84,7 @@ void main() {
   group('device type overrides (ANA-08)', () {
     testWidgets('can be added, replaced case-insensitively and removed', (tester) async {
       final t = await pumpApp(tester, size: settingsTall, initial: AppDestination.settings);
-      expect(find.text('Device types for particular devices'), findsOneWidget);
+      expect(find.text('Device type overrides'), findsOneWidget);
       expect(find.textContaining('No overrides.'), findsOneWidget);
 
       // A key without a room and a slash is rejected in text.
@@ -151,39 +151,37 @@ void main() {
       await expectMeetsA11yGuidelines(tester);
     });
 
-    testWidgets('Devices and Forecast explain Projector_N naming and link to Settings', (tester) async {
+    testWidgets('Devices and Forecast explain where device types come from and link to the overrides',
+        (tester) async {
       final t = await pumpWithData(tester, dataset: demoDataset(2), initial: AppDestination.devices, size: tall);
-      expect(find.text(ProjectorNamingNote.title), findsOneWidget);
-      expect(find.textContaining('flat panels included, as Projector_N'), findsOneWidget);
-      await tester.tap(find.text('Set device types in Settings'));
-      await tester.pump();
-      expect(t.navigation.current, AppDestination.settings);
-
+      expect(find.text(DeviceTypeNote.title), findsOneWidget);
+      expect(find.textContaining('grouped by the type in its metric name'), findsOneWidget);
       t.navigation.goTo(AppDestination.forecast);
       await settleWork(tester, t);
-      expect(find.text(ProjectorNamingNote.title), findsOneWidget);
-      expect(find.textContaining('No device type overrides are set yet.'), findsOneWidget);
-    });
+      expect(find.text(DeviceTypeNote.title), findsOneWidget);
+      expect(find.textContaining('No device type overrides are set.'), findsOneWidget);
 
-    test('the note is only for data with Projector_N devices', () {
-      expect(hasProjectorNamedDevices(['Projector_1', 'Camera_1']), isTrue);
-      expect(hasProjectorNamedDevices(['PROJECTOR2']), isTrue);
-      expect(hasProjectorNamedDevices(['Display_1', 'Camera_1']), isFalse);
+      await tester.tap(find.text(DeviceTypeNote.buttonLabel));
+      await pumpFrames(tester, 12);
+      expect(t.navigation.current, AppDestination.settings);
+      // The page scrolls to the overrides and focuses them.
+      expect(find.text('Device type overrides'), findsOneWidget);
+      expect(FocusManager.instance.primaryFocus?.debugLabel, 'Settings Device type overrides');
+      expect(takeAnnouncementTexts(tester), contains('Showing Device type overrides settings.'));
     });
   });
 
   group('settings explanations', () {
-    testWidgets('navigation pattern exclusions and the 7-day session rule are explained (ANA-11, ANA-03)',
+    testWidgets('the navigation pattern and the 7-day session rule are explained (ANA-11, ANA-03)',
         (tester) async {
       await pumpApp(tester, size: settingsTall, initial: AppDestination.settings);
-      expect(find.textContaining('Btn_Start_Page (the power-on button)'), findsOneWidget);
-      expect(find.textContaining('Btn_Std_Backlight) are deliberately left out'), findsOneWidget);
+      expect(find.textContaining('are counted as navigation (page flips, menus, tabs, back, home)'), findsOneWidget);
       expect(
         find.textContaining("A device's real off event up to ${SessionBuilder.deviceHardLimit.inDays} days after"),
         findsOneWidget,
       );
       // Long helper text wraps instead of being cut off at 200% text.
-      for (final label in ['Longest believable session', 'Navigation button pattern', 'Room and device']) {
+      for (final label in ['Longest believable session', 'Navigation pattern', 'Room and device']) {
         final decoration = tester.widget<TextField>(textField(label)).decoration!;
         expect(decoration.helperMaxLines, settingsTextMaxLines, reason: label);
         expect(decoration.errorMaxLines, settingsTextMaxLines, reason: label);
@@ -192,7 +190,7 @@ void main() {
 
     testWidgets('settings render without overflow in a narrow window at 200% text', (tester) async {
       await pumpApp(tester, size: const Size(400, 9000), textScale: 2.0, initial: AppDestination.settings);
-      final t = find.text('Device types for particular devices');
+      final t = find.text('Add override');
       await tester.scrollUntilVisible(t, 400,
           scrollable: find.descendant(of: find.byType(SettingsScreen), matching: find.byType(Scrollable)).first);
       await tester.pump();
@@ -200,12 +198,13 @@ void main() {
       expect(find.text('Add override'), findsOneWidget);
     });
 
-    testWidgets('a non-blocking hint appears when "Device left on after" reaches the session limit', (tester) async {
+    testWidgets('a non-blocking hint appears when "Long device session after" reaches the session limit',
+        (tester) async {
       final t = await pumpApp(tester, size: settingsTall, initial: AppDestination.settings);
       const hint = 'is at or above "Longest believable session"';
       expect(find.textContaining(hint), findsNothing);
 
-      await tester.enterText(textField('Device left on after'), '16');
+      await tester.enterText(textField('Long device session after'), '16');
       await pumpFrames(tester, 2);
       // Saved as entered (not blocked) and explained.
       expect(t.settings.analysisConfig.thresholds.deviceLeftOnHours, 16);
@@ -230,9 +229,9 @@ void main() {
       expect(pc.hours, greaterThan(0.4));
       expect(hdmi.selections, 1);
 
-      expect(find.textContaining('times someone chose an input; 1 startup default not counted'), findsOneWidget);
-      await scrollTo(tester, find.text('How inputs are counted'));
-      expect(find.textContaining('is not counted as a user selection'), findsOneWidget);
+      expect(find.textContaining('source selections logged; 1 startup default not counted'), findsOneWidget);
+      await scrollTo(tester, find.text('How sources are counted'));
+      expect(find.textContaining('is not counted as a selection'), findsOneWidget);
       expect(find.textContaining('It still counts toward time on screen.'), findsOneWidget);
       expect(find.textContaining('1 startup selection was left out of the selection counts'), findsOneWidget);
     });
@@ -242,7 +241,7 @@ void main() {
         InputShare(key: 'pc', label: 'PC', selections: 0, selectionShare: 0, hours: 2, timeShare: 1, roomCount: 1),
       ];
       expect(noInputMessage(shares, InputMeasure.selections, 'all rooms'), contains('Only the startup default'));
-      expect(noInputMessage(const [], InputMeasure.selections, 'all rooms'), contains('No video input was selected'));
+      expect(noInputMessage(const [], InputMeasure.selections, 'all rooms'), contains('No source selections were logged'));
     });
   });
 

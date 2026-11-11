@@ -8,7 +8,7 @@ import 'package:metrics_visualizer/ui/screens/settings_screen.dart';
 import 'ui_test_helpers.dart';
 
 /// Tall enough to show the whole settings page without scrolling.
-const Size settingsSize = Size(1400, 6000);
+const Size settingsSize = Size(1400, 14000);
 
 Finder textField(String label) =>
     find.ancestor(of: find.text(label), matching: find.byType(TextField)).first;
@@ -90,11 +90,11 @@ void main() {
 
   testWidgets('number fields validate their range', (tester) async {
     final t = await pumpApp(tester, size: settingsSize, initial: AppDestination.settings);
-    await tester.enterText(textField('Button mashing: events'), '1');
+    await tester.enterText(textField('Repeated presses of one control: events'), '1');
     await pumpFrames(tester, 2);
     expect(find.text('Must be from 2 to 1000.'), findsOneWidget);
     expect(t.settings.analysisConfig.thresholds.buttonMashCount, 6);
-    await tester.enterText(textField('Button mashing: events'), '9');
+    await tester.enterText(textField('Repeated presses of one control: events'), '9');
     await pumpFrames(tester, 2);
     expect(t.settings.analysisConfig.thresholds.buttonMashCount, 9);
 
@@ -103,9 +103,9 @@ void main() {
     expect(t.settings.analysisConfig.ratedLifeHours['PROJECTOR'], 6000);
   });
 
-  testWidgets('input names and excluded clients can be edited', (tester) async {
+  testWidgets('source names and excluded clients can be edited', (tester) async {
     final t = await pumpApp(tester, size: settingsSize, initial: AppDestination.settings);
-    await tester.enterText(textField('Input name, e.g. hdmi_2'), 'HDMI_2');
+    await tester.enterText(textField('Source name, e.g. hdmi_2'), 'HDMI_2');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await pumpFrames(tester, 2);
     expect(t.settings.analysisConfig.classifier.inputNames, contains('hdmi_2'));

@@ -41,10 +41,10 @@ void main() {
     await tester.pump();
     expect(summary(), contains('in 5 years'));
 
-    // Input trends: a chart and statements in words, grouped by direction.
-    await scrollTo(tester, find.text('Input selections per week'));
+    // Source trends: a chart and statements in words, grouped by direction.
+    await scrollTo(tester, find.text('Source selections per week'));
     expect(find.textContaining('Weekly selections of the'), findsOneWidget);
-    await scrollTo(tester, find.text('Input usage trends'));
+    await scrollTo(tester, find.text('Source usage trends'));
     expect(find.text(f.inputs.first.explanation), findsOneWidget);
     expect(find.textContaining('Growing ('), findsOneWidget);
   });

@@ -45,14 +45,37 @@ void main() {
       expect(File('fonts/Roboto/LICENSE.txt').existsSync(), isTrue);
     });
 
-    test('documented and CI web builds turn off the CDN', () {
+    test('the documented web build turns off the CDN', () {
       final readme = File('README.md').readAsStringSync();
-      final ci = File('../../.github/workflows/visualizer-app.yml').readAsStringSync();
-      final release = File('../../.github/workflows/visualizer-app-release.yml').readAsStringSync();
-      for (final text in [readme, ci, release]) {
-        expect(text, contains('flutter build web --release --no-web-resources-cdn'));
-        expect(RegExp(r'flutter build web(?! --release --no-web-resources-cdn)').hasMatch(text), isFalse);
-      }
+      expect(readme, contains('flutter build web --release --no-web-resources-cdn'));
+      expect(RegExp(r'flutter build web(?! --release --no-web-resources-cdn)').hasMatch(readme), isFalse);
+    });
+  });
+
+  group('CI builds and ships Windows', () {
+    final ci = File('../../.github/workflows/visualizer-app.yml').readAsStringSync();
+    final release = File('../../.github/workflows/visualizer-app-release.yml').readAsStringSync();
+    final pinned = RegExp(r'flutter-version:\s*(\S+)');
+    final releaseVersion = RegExp(r'FLUTTER_VERSION:\s*(\S+)');
+
+    for (final (name, text) in [('visualizer-app.yml', ci), ('visualizer-app-release.yml', release)]) {
+      test('$name analyzes, tests and builds a Windows release on Windows', () {
+        expect(text, contains('runs-on: windows-latest'), reason: name);
+        expect(text, contains('flutter pub get'), reason: name);
+        expect(text, contains('flutter analyze'), reason: name);
+        expect(text, contains('flutter test'), reason: name);
+        expect(text, contains('flutter build windows --release'), reason: name);
+        // Web builds are not part of CI any more.
+        expect(text, isNot(contains('flutter build web')), reason: name);
+      });
+    }
+
+    test('both workflows pin the same Flutter release', () {
+      final ciVersion = pinned.firstMatch(ci)?.group(1);
+      expect(ciVersion, isNotNull);
+      expect(ciVersion, matches(RegExp(r'^\d+\.\d+\.\d+$')));
+      expect(releaseVersion.firstMatch(release)?.group(1), ciVersion);
+      expect(release, contains(r'flutter-version: ${{ env.FLUTTER_VERSION }}'));
     });
   });
 

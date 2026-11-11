@@ -27,16 +27,16 @@ void main() {
   testWidgets('filtering by type, severity, room and search narrows the list', (tester) async {
     final t = await pumpWithData(tester, dataset: demoDataset(2), initial: AppDestination.issues, size: tall);
     final all = t.app.analysis!.issues;
-    final help = all.where((i) => i.type == IssueType.helpRequest).toList();
+    final help = all.where((i) => i.type == IssueType.helpEvents).toList();
     expect(help.length, lessThan(all.length));
 
-    await tester.tap(find.widgetWithText(FilterChip, 'Help requested (${help.length})'));
+    await tester.tap(find.widgetWithText(FilterChip, 'Help-labelled events (${help.length})'));
     await tester.pump();
     expect(find.text('Showing ${help.length} of ${all.length} issues'), findsOneWidget);
     expect(takeAnnouncementTexts(tester), contains('Showing ${help.length} of ${all.length} issues.'));
     // Every visible tile is a help request.
     for (final e in find.byType(IssueTile).evaluate()) {
-      expect((e.widget as IssueTile).issue.type, IssueType.helpRequest);
+      expect((e.widget as IssueTile).issue.type, IssueType.helpEvents);
     }
 
     // Severity chips combine with the type filter.
@@ -104,15 +104,15 @@ void main() {
   testWidgets('an issue expands to explanation, action, evidence and opens its room', (tester) async {
     final t = await pumpWithData(tester, dataset: demoDataset(2), initial: AppDestination.issues, size: tall);
     final all = t.app.analysis!.issues;
-    // Show only the button-mashing issue (it has evidence events).
-    final mash = all.firstWhere((i) => i.type == IssueType.buttonMashing);
-    await tester.tap(find.widgetWithText(FilterChip, 'Repeated button presses (1)'));
+    // Show only the repeated-presses issue (it has evidence events).
+    final mash = all.firstWhere((i) => i.type == IssueType.repeatedPresses);
+    await tester.tap(find.widgetWithText(FilterChip, 'Repeated presses of one control (1)'));
     await tester.pump();
     expect(visibleTiles(tester), 1);
 
     await tester.tap(find.text(mash.title));
     await tester.pump();
-    expect(find.text('What happened'), findsOneWidget);
+    expect(find.text('What the data shows'), findsOneWidget);
     expect(find.text(mash.explanation), findsOneWidget);
     expect(find.text(mash.suggestedAction), findsOneWidget);
     expect(find.text(mash.evidence.first.metric), findsWidgets);
@@ -137,23 +137,23 @@ void main() {
     // Space toggles the focused tile open.
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pump();
-    expect(find.text('What happened'), findsOneWidget);
+    expect(find.text('What the data shows'), findsOneWidget);
   });
 
   testWidgets('copies the filtered issues as CSV', (tester) async {
     final clipboard = ClipboardSpy(tester);
     final t = await pumpWithData(tester, dataset: demoDataset(2), initial: AppDestination.issues, size: tall);
     final all = t.app.analysis!.issues;
-    final offline = all.where((i) => i.type == IssueType.offlineRoom).toList();
-    await tester.tap(find.widgetWithText(FilterChip, 'Room offline (${offline.length})'));
+    final offline = all.where((i) => i.type == IssueType.heartbeatGap).toList();
+    await tester.tap(find.widgetWithText(FilterChip, 'Heartbeat gap (${offline.length})'));
     await tester.pump();
     await tester.tap(find.text('Copy ${offline.length} as CSV'));
     await tester.pump();
     final csv = clipboard.text!;
     final lines = csv.trim().split('\n');
-    expect(lines.first, startsWith('id,severity,type,likely_cause,building,room'));
+    expect(lines.first, startsWith('id,severity,type,area,building,room'));
     expect(lines.length, offline.length + 1);
-    expect(csv, contains('Room offline'));
+    expect(csv, contains('Heartbeat gap'));
     expect(takeAnnouncementTexts(tester), contains('${offline.length} issues copied to the clipboard as CSV.'));
   });
 
@@ -175,7 +175,7 @@ void main() {
   testWidgets('shows a friendly empty state when nothing was flagged', (tester) async {
     final t = await pumpWithData(tester, dataset: quietDataset(), initial: AppDestination.issues);
     expect(t.app.analysis!.issues, isEmpty);
-    expect(find.text('No potential issues found'), findsOneWidget);
+    expect(find.text('No patterns found'), findsOneWidget);
     await expectMeetsA11yGuidelines(tester);
     await tester.tap(find.text('Detection thresholds'));
     await tester.pump();

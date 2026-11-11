@@ -1,5 +1,8 @@
 name: Visualizer App
 
+# The Metrics Visualizer currently ships as a Windows desktop app, so CI
+# analyzes, tests, and builds it on Windows. Other platforms (web, macOS,
+# Linux) still compile from the same source but are not built or tested here.
 on:
   push:
     paths:
@@ -19,10 +22,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  analyze-test-build:
-    name: Analyze, test, and build the Metrics Visualizer
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  windows:
+    name: Analyze, test, and build the Metrics Visualizer (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: visualizer_app/metrics_visualizer
@@ -53,24 +56,14 @@ jobs:
       - name: Test
         run: flutter test
 
-      # --no-web-resources-cdn serves CanvasKit from the site itself instead
-      # of www.gstatic.com (see web/flutter_bootstrap.js and the README
-      # section "Hosting the web build").
-      - name: Build web release
-        run: flutter build web --release --no-web-resources-cdn
+      - name: Build Windows release
+        run: flutter build windows --release
 
-      - name: Check the web build makes no requests to Google's CDN
-        run: |
-          grep -q "canvasKitBaseUrl: 'canvaskit/'" build/web/flutter_bootstrap.js
-          grep -q '"useLocalCanvasKit":true' build/web/flutter_bootstrap.js
-          grep -q '"family":"Roboto"' build/web/assets/FontManifest.json
-          test -f build/web/canvaskit/canvaskit.wasm
-
-      - name: Upload web build
+      - name: Upload Windows build
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: metrics-visualizer-web
-          path: visualizer_app/metrics_visualizer/build/web
+          name: metrics-visualizer-windows-x64
+          path: visualizer_app/metrics_visualizer/build/windows/x64/runner/Release
           if-no-files-found: error
           retention-days: 14

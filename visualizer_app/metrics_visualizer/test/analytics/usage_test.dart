@@ -79,7 +79,7 @@ void main() {
           .where((u) => u.kind == UnderuseKind.neverUsedInRoom)
           .map((u) => (u.room, u.key))
           .toList();
-      expect(never, [('BSS_3', 'doc_cam')]);
+      expect(never, [('BSS_3', 'document camera')]);
     });
 
     test('the startup default source counts for time but not selections', () {
@@ -270,7 +270,7 @@ void main() {
       expect(up.presses, 2);
       expect(up.taps, 1);
       expect(r.ui.rooms.single.topButtons.first.control, 'Btn_Volume_Up');
-      expect(r.ui.shares.single.station, 'Station 2');
+      expect(r.ui.shares.single.station, 'NAV Share - Station 2');
     });
 
     test('volume levels and mute time', () {
@@ -353,6 +353,6 @@ void main() {
     expect(r.ui.totalPresses, greaterThan(20));
     // BSS_251 pressed Btn_Cam_Right 4 times in a second: below the
     // repeatable threshold, so not flagged.
-    expect(r.issues.where((i) => i.type == IssueType.buttonMashing), isEmpty);
+    expect(r.issues.where((i) => i.type == IssueType.repeatedPresses), isEmpty);
   });
 }
