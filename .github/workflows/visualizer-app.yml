@@ -1,0 +1,76 @@
+name: Visualizer App
+
+on:
+  push:
+    paths:
+      - "visualizer_app/**"
+      - ".github/workflows/visualizer-app.yml"
+  pull_request:
+    paths:
+      - "visualizer_app/**"
+      - ".github/workflows/visualizer-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visualizer-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-test-build:
+    name: Analyze, test, and build the Metrics Visualizer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: visualizer_app/metrics_visualizer
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          # Pinned to the release the test suite was verified with; a new
+          # stable release can add lints that fail "flutter analyze". Bump it
+          # deliberately after running analyze and test locally.
+          channel: stable
+          flutter-version: 3.47.6
+          cache: true
+
+      - name: Show Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      # --no-web-resources-cdn serves CanvasKit from the site itself instead
+      # of www.gstatic.com (see web/flutter_bootstrap.js and the README
+      # section "Hosting the web build").
+      - name: Build web release
+        run: flutter build web --release --no-web-resources-cdn
+
+      - name: Check the web build makes no requests to Google's CDN
+        run: |
+          grep -q "canvasKitBaseUrl: 'canvaskit/'" build/web/flutter_bootstrap.js
+          grep -q '"useLocalCanvasKit":true' build/web/flutter_bootstrap.js
+          grep -q '"family":"Roboto"' build/web/assets/FontManifest.json
+          test -f build/web/canvaskit/canvaskit.wasm
+
+      - name: Upload web build
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-visualizer-web
+          path: visualizer_app/metrics_visualizer/build/web
+          if-no-files-found: error
+          retention-days: 14

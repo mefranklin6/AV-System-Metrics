@@ -1,0 +1,104 @@
+name: Visualizer App Release
+
+# Builds ready-to-run copies of the Metrics Visualizer and attaches them to
+# a GitHub Release, so managers and administrators do not need the Flutter
+# SDK. Push a tag such as "visualizer-v1.0.0" to publish a release.
+on:
+  push:
+    tags:
+      - "visualizer-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visualizer-app-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Keep in step with .github/workflows/visualizer-app.yml.
+  FLUTTER_VERSION: 3.47.6
+
+jobs:
+  web:
+    name: Build web release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: visualizer_app/metrics_visualizer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build web release (CanvasKit served from the site, not a CDN)
+        run: flutter build web --release --no-web-resources-cdn
+      - name: Zip
+        run: |
+          cd build/web
+          zip -r -q "$GITHUB_WORKSPACE/metrics-visualizer-web.zip" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-web
+          path: metrics-visualizer-web.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Build Windows release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: visualizer_app/metrics_visualizer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - name: Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build/windows/x64/runner/Release/* `
+            -DestinationPath "$env:GITHUB_WORKSPACE/metrics-visualizer-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: metrics-visualizer-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: [web, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+      - name: Checksums
+        run: sha256sum metrics-visualizer-*.zip > SHA256SUMS.txt
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Metrics Visualizer ${TAG#visualizer-v}" \
+            --notes "Ready-to-run builds of the AV Metrics Visualizer. Windows: unzip metrics-visualizer-windows-x64.zip and run metrics_visualizer.exe (the build is not code-signed, so Windows SmartScreen may ask you to confirm). Web: unzip metrics-visualizer-web.zip onto an HTTPS web server; see visualizer_app/metrics_visualizer/README.md, 'Get the app'. Verify downloads against SHA256SUMS.txt." \
+            metrics-visualizer-web.zip metrics-visualizer-windows-x64.zip SHA256SUMS.txt

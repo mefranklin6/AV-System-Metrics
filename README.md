@@ -65,6 +65,13 @@ After initial setup and deployment, you will end up with a database containing u
 
 You can then analyze the data with scripts or visualize it in tools like PowerBI. The self-hosted PostgreSQL deployment can also publish a database port for pgAdmin or similar tools when explicitly enabled in its `.env` file. ![power_bi_example](/images/power_bi_example.png)
 
+## Reporting and Visualization (Optional)
+
+Two optional add-ons help you get answers out of the data. Both are read-only: they never change the metrics database, and they are separate from data collection, so turning them on or off does not change how your control processors send metrics.
+
+- [Analytics API](/Self_Hosted/analytics_api/README.md) - a read-only REST API for the self-hosted system, off by default, with its own token and its own read-only database account. Use it to build your own reports and apps.
+- [Metrics Visualizer](/visualizer_app/metrics_visualizer/README.md) - an accessible desktop and web app that shows how rooms and devices are actually used, such as which inputs people pick and which rooms go offline. It reads from the Analytics API or from a CSV export.
+
 ## Contributions encouraged
 
 The goal of this project is to provide a solution for every major AV control system, with a variety of hosting options. I only have access to a limited number of proprietary control systems and only have experience with a limited number of cloud providers, so contributions are highly encouraged!

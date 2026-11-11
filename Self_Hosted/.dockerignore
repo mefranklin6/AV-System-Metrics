@@ -7,3 +7,5 @@ secrets/
 *.out
 metrics-ingest
 metrics-vm-go.zip
+# The optional Analytics API is a separate module with its own image.
+analytics_api/

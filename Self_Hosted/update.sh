@@ -1,7 +1,257 @@
 #!/usr/bin/env bash
+#
+# Self-update guard: keep this comment, the block of '#' lines, and the check
+# after it at the very top of the file.
+#
+# update.sh installs a new copy of itself. Earlier releases copied the new file
+# over the running one in place, so bash went on to read the NEW file from the
+# byte offset where it had stopped in the old one (11574 to 17193 bytes into the
+# file, depending on the release). Every one of those offsets falls inside the
+# block below, whose lines hold nothing but '#' characters, so bash reads only
+# comments and then reaches the check, which stops the old updater before it
+# runs anything else. Running the update again with this version finishes it.
+#
+# This version cannot be affected itself: it installs files with an atomic
+# rename and its body is the main() function, which bash reads completely
+# before running any of it.
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+if [[ "$(declare -p MANAGED_FILES 2>/dev/null)" == 'declare -ar '* ]]; then
+  printf '%s\n' \
+    'ERROR: the previous update.sh replaced itself while it was running and was stopped.' \
+    'The new stack files are installed, but .env was not merged and no container was changed.' \
+    'Run the update again to finish it: bash update.sh' >&2
+  exit 1
+fi
 
 set -Eeuo pipefail
 
+main() {
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPOSITORY_URL="${AVSM_REPOSITORY_URL:-https://raw.githubusercontent.com/mefranklin6/AV-System-Metrics}"
 AVSM_REF="${AVSM_REF:-main}"
@@ -69,6 +319,7 @@ cleanup() {
   if [[ -n "$STAGE_DIR" && "$STAGE_DIR" == "$SCRIPT_DIR"/.avsm-update.tmp.* ]]; then
     rm -rf -- "$STAGE_DIR"
   fi
+  rm -f -- "$SCRIPT_DIR"/.avsm-new.*
   exit "$status"
 }
 
@@ -125,7 +376,20 @@ for command_name in curl docker awk mktemp; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command not found: $command_name"
 done
 
-docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required"
+# The Compose files use depends_on "required: false", added in Compose 2.20.
+require_compose_version() {
+  local version
+  version="$(docker compose version --short 2>/dev/null)" || die "Docker Compose v2 is required"
+  version="${version#v}"
+  if [[ "$version" =~ ^([0-9]+)\.([0-9]+) ]]; then
+    if ((10#${BASH_REMATCH[1]} < 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} < 20))); then
+      die "Docker Compose $version is too old; upgrade the Docker Compose plugin to version 2.20 or newer"
+    fi
+  else
+    warn "could not read the Docker Compose version; version 2.20 or newer is required"
+  fi
+}
+require_compose_version
 
 STAGE_DIR="$(mktemp -d "$SCRIPT_DIR/.avsm-update.tmp.XXXXXX")"
 EMPTY_TEMPLATE="$STAGE_DIR/empty.env.example"
@@ -138,6 +402,8 @@ readonly -a MANAGED_FILES=(
   docker-compose.yml
   docker-compose.database-expose-false.yml
   docker-compose.database-expose-true.yml
+  docker-compose.analytics-false.yml
+  docker-compose.analytics-true.yml
   .env.example
   update.sh
   maintenance.sh
@@ -165,7 +431,8 @@ merge_env() {
     -v base_file="$base_template" \
     -v local_file="$local_env" \
     -v new_file="$new_template" \
-    -v report_file="$report_file" '
+    -v report_file="$report_file" \
+    -v managed_marker='#### Do not modify below this line ####' '
     function parse_setting(line,    normalized, equals_at, candidate) {
       normalized = line
       sub(/^[[:space:]]*/, "", normalized)
@@ -225,6 +492,15 @@ merge_env() {
     FILENAME == new_file {
       parsed = parse_setting($0)
       if (parsed == 0) {
+        marker = $0
+        sub(/\r$/, "", marker)
+        sub(/^[[:space:]]+/, "", marker)
+        sub(/[[:space:]]+$/, "", marker)
+        if (marker == managed_marker) {
+          # Settings below this marker select the Compose files. They always
+          # take the template value, even without a previous template.
+          managed_section = 1
+        }
         print $0
         next
       }
@@ -246,6 +522,14 @@ merge_env() {
       if (!(key in local_seen)) {
         selected_value = upstream_value
         print "NEW\t" key >> report_file
+      } else if (managed_section) {
+        selected_value = upstream_value
+        if (local_value[key] != upstream_value) {
+          print "MANAGED\t" key >> report_file
+        }
+        if ((key in base_seen) && local_value[key] != base_value[key]) {
+          print "MANAGED_LOCAL_EDIT\t" key >> report_file
+        }
       } else if (!(key in base_seen)) {
         selected_value = local_value[key]
       } else if (upstream_value != base_value[key] && local_value[key] == base_value[key]) {
@@ -287,7 +571,7 @@ merge_env() {
 BASE_TEMPLATE="$SCRIPT_DIR/.env.example"
 if [[ ! -f "$BASE_TEMPLATE" ]]; then
   BASE_TEMPLATE="$EMPTY_TEMPLATE"
-  warn "no previous .env.example was found; local values will be preserved conservatively"
+  warn "no previous .env.example was found; local values will be preserved conservatively, except the managed Compose settings at the end of the template"
 fi
 
 if ! merge_env "$BASE_TEMPLATE" "$SCRIPT_DIR/.env" "$STAGE_DIR/.env.example" "$MERGED_ENV" "$MERGE_REPORT"; then
@@ -315,6 +599,14 @@ print_report_category NEW "New settings added with their template defaults"
 print_report_category DEFAULT_UPDATED "Unmodified settings updated to new template defaults"
 print_report_category CONFLICT "Conflicts; local values were kept"
 print_report_category RETIRED "Settings retained for review because they left the template"
+print_report_category MANAGED "Managed settings below '#### Do not modify below this line ####' replaced with the new template values"
+if (($(report_count MANAGED_LOCAL_EDIT) > 0)); then
+  awk -F '\t' '$1 == "MANAGED_LOCAL_EDIT" { print $2 }' "$MERGE_REPORT" | while IFS= read -r edited_setting; do
+    warn "$edited_setting was changed locally below '#### Do not modify below this line ####' and is replaced with the template value"
+  done
+  warn "Compose files you added to COMPOSE_FILE are no longer loaded, and 'docker compose up --remove-orphans' removes the containers of their services"
+  warn "run 'bash update.sh --check' to preview, and keep extra services in a separate Compose project"
+fi
 
 env_value() {
   local env_file="$1"
@@ -339,29 +631,107 @@ env_value() {
   ' "$env_file"
 }
 
-NEW_EXPOSE_DATABASE="$(env_value "$MERGED_ENV" EXPOSE_DATABASE)"
-case "$NEW_EXPOSE_DATABASE" in
-  true|false) ;;
-  *) die "EXPOSE_DATABASE must be either true or false" ;;
-esac
+# Mirror COMPOSE_FILE in .env: the base file plus one overlay per true/false flag.
+# Strict mode (the downloaded stack) rejects invalid flags and missing overlays.
+# Lenient mode (the installed stack) skips overlays that an older install lacks.
+compose_file_arguments() {
+  local env_file="$1"
+  local compose_directory="$2"
+  local strict="$3"
+  local setting_name flag_value overlay_file
+  COMPOSE_FILE_ARGUMENTS=(-f "$compose_directory/docker-compose.yml")
+  for setting_name in EXPOSE_DATABASE ENABLE_ANALYTICS_API; do
+    flag_value="$(env_value "$env_file" "$setting_name")"
+    case "$flag_value" in
+      true|false) ;;
+      *)
+        [[ "$strict" != true ]] || die "$setting_name must be either true or false"
+        continue
+        ;;
+    esac
+    case "$setting_name" in
+      EXPOSE_DATABASE) overlay_file="docker-compose.database-expose-${flag_value}.yml" ;;
+      ENABLE_ANALYTICS_API) overlay_file="docker-compose.analytics-${flag_value}.yml" ;;
+    esac
+    if [[ -f "$compose_directory/$overlay_file" ]]; then
+      COMPOSE_FILE_ARGUMENTS+=(-f "$compose_directory/$overlay_file")
+    elif [[ "$strict" == true ]]; then
+      die "Compose overlay is missing: $overlay_file"
+    fi
+  done
+}
+
+# Fail before any downtime when the optional Analytics API would refuse to start.
+# These rules mirror Self_Hosted/analytics_api (config.go and provision.go);
+# change both together. Only setting names and positions are reported; values
+# are never printed.
+validate_analytics_settings() {
+  local env_file="$1"
+  local LC_ALL=C
+  local token_setting remaining password bearer_token database_password token provision_timeout
+  local token_position=0
+  token_setting="$(env_value "$env_file" ANALYTICS_API_TOKEN)"
+  password="$(env_value "$env_file" ANALYTICS_DB_PASSWORD)"
+  bearer_token="$(env_value "$env_file" BEARER_TOKEN)"
+  database_password="$(env_value "$env_file" POSTGRES_PASSWORD)"
+
+  [[ "$token_setting" == *[![:space:]]* ]] || die "ANALYTICS_API_TOKEN is required when ENABLE_ANALYTICS_API=true"
+  # Split on every comma, keeping empty entries so stray commas are reported.
+  remaining="$token_setting,"
+  while [[ -n "$remaining" ]]; do
+    token="${remaining%%,*}"
+    remaining="${remaining#*,}"
+    token_position=$((token_position + 1))
+    ((token_position <= 64)) || die "ANALYTICS_API_TOKEN may list at most 64 tokens"
+    token="${token#"${token%%[![:space:]]*}"}"
+    token="${token%"${token##*[![:space:]]}"}"
+    [[ -n "$token" ]] || die "ANALYTICS_API_TOKEN entry $token_position is empty (remove extra commas)"
+    [[ "$token" != 'change-me-long-random-analytics-token' ]] || die "ANALYTICS_API_TOKEN must be changed from the .env.example value when ENABLE_ANALYTICS_API=true"
+    ((${#token} >= 32 && ${#token} <= 512)) || die "ANALYTICS_API_TOKEN entry $token_position must be 32 to 512 characters"
+    # Compose interpolates $ and treats quotes, backslashes, and # specially in
+    # .env, so only characters it passes through unchanged are allowed.
+    [[ "$token" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || die "ANALYTICS_API_TOKEN entry $token_position may only contain letters, digits, and . _ ~ + / = - (for example from openssl rand -hex 32)"
+    [[ "$token" != "$bearer_token" ]] || die "ANALYTICS_API_TOKEN entry $token_position must not reuse BEARER_TOKEN"
+  done
+
+  [[ -n "$password" ]] || die "ANALYTICS_DB_PASSWORD is required when ENABLE_ANALYTICS_API=true"
+  [[ "$password" != 'change_me_url_safe_analytics_password' ]] || die "ANALYTICS_DB_PASSWORD must be changed from the .env.example value when ENABLE_ANALYTICS_API=true"
+  [[ "$password" =~ ^[A-Za-z0-9._~-]{16,128}$ ]] || die "ANALYTICS_DB_PASSWORD must be 16 to 128 characters using only A-Z a-z 0-9 . _ ~ -"
+  [[ "$password" != "$database_password" ]] || die "ANALYTICS_DB_PASSWORD must not reuse POSTGRES_PASSWORD"
+
+  # The updater waits for provisioning, so it needs the limit in seconds. Only
+  # whole hours, minutes, and seconds are accepted (Go accepts more forms).
+  provision_timeout="$(env_value "$env_file" ANALYTICS_PROVISION_TIMEOUT)"
+  provision_timeout="${provision_timeout:-15m}"
+  [[ "$provision_timeout" =~ ^(([0-9]{1,3})h)?(([0-9]{1,5})m)?(([0-9]{1,6})s)?$ ]] || die "ANALYTICS_PROVISION_TIMEOUT must be whole hours, minutes, or seconds, such as 15m, 1h, or 1h30m"
+  ANALYTICS_PROVISION_SECONDS=$((10#${BASH_REMATCH[2]:-0} * 3600 + 10#${BASH_REMATCH[4]:-0} * 60 + 10#${BASH_REMATCH[6]:-0}))
+  ((ANALYTICS_PROVISION_SECONDS > 0)) || die "ANALYTICS_PROVISION_TIMEOUT must be longer than zero"
+}
+
+compose_file_arguments "$MERGED_ENV" "$STAGE_DIR" true
+NEW_ENABLE_ANALYTICS_API="$(env_value "$MERGED_ENV" ENABLE_ANALYTICS_API)"
+ANALYTICS_PROVISION_SECONDS=900
+if [[ "$NEW_ENABLE_ANALYTICS_API" == true ]]; then
+  validate_analytics_settings "$MERGED_ENV"
+fi
 
 printf 'Validating the downloaded Compose configuration...\n'
 docker compose \
   --env-file "$MERGED_ENV" \
-  -f "$STAGE_DIR/docker-compose.yml" \
-  -f "$STAGE_DIR/docker-compose.database-expose-${NEW_EXPOSE_DATABASE}.yml" \
+  "${COMPOSE_FILE_ARGUMENTS[@]}" \
   config --quiet
 
 postgres_image() {
   local env_file="$1"
   local compose_directory="$2"
-  local expose_database
-  expose_database="$(env_value "$env_file" EXPOSE_DATABASE)"
+  local strict="$3"
+  compose_file_arguments "$env_file" "$compose_directory" "$strict"
+  # Name the service: other services (such as analytics-db-disable) also run
+  # a postgres image, and only the database's own image matters here.
   docker compose \
     --env-file "$env_file" \
-    -f "$compose_directory/docker-compose.yml" \
-    -f "$compose_directory/docker-compose.database-expose-${expose_database}.yml" \
-    config --images | awk '/(^|\/)postgres:[0-9]+/ { print; exit }'
+    "${COMPOSE_FILE_ARGUMENTS[@]}" \
+    config --images postgres | awk '/(^|\/)postgres:[0-9]+/ { print; exit }'
 }
 
 postgres_major() {
@@ -372,8 +742,8 @@ postgres_major() {
 }
 
 if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
-  OLD_POSTGRES_IMAGE="$(postgres_image "$SCRIPT_DIR/.env" "$SCRIPT_DIR")"
-  NEW_POSTGRES_IMAGE="$(postgres_image "$MERGED_ENV" "$STAGE_DIR")"
+  OLD_POSTGRES_IMAGE="$(postgres_image "$SCRIPT_DIR/.env" "$SCRIPT_DIR" false)"
+  NEW_POSTGRES_IMAGE="$(postgres_image "$MERGED_ENV" "$STAGE_DIR" true)"
   OLD_POSTGRES_MAJOR="$(postgres_major "$OLD_POSTGRES_IMAGE")"
   NEW_POSTGRES_MAJOR="$(postgres_major "$NEW_POSTGRES_IMAGE")"
   if [[ -n "$OLD_POSTGRES_MAJOR" && -n "$NEW_POSTGRES_MAJOR" && "$OLD_POSTGRES_MAJOR" != "$NEW_POSTGRES_MAJOR" ]]; then
@@ -492,6 +862,39 @@ else
   BACKUP_RESULT="$BACKUP_DIR"
 fi
 
+image_is_pinned() {
+  case "$1" in
+    *@sha256:*|*:sha-[0-9a-fA-F]*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+PINNED_IMAGE_SETTINGS=()
+if image_is_pinned "$(env_value "$MERGED_ENV" METRICS_INGEST_IMAGE)"; then
+  PINNED_IMAGE_SETTINGS+=(METRICS_INGEST_IMAGE)
+fi
+if [[ "$NEW_ENABLE_ANALYTICS_API" == true ]] && image_is_pinned "$(env_value "$MERGED_ENV" ANALYTICS_API_IMAGE)"; then
+  PINNED_IMAGE_SETTINGS+=(ANALYTICS_API_IMAGE)
+fi
+# A pinned image stops the update before containers change, so a running
+# Analytics API would keep its current tokens and database login.
+ANALYTICS_API_RUNNING=false
+if ((${#PINNED_IMAGE_SETTINGS[@]} > 0)) &&
+  docker compose ps --services --status running 2>/dev/null | awk '$0 == "analytics-api" { found = 1 } END { exit !found }'; then
+  ANALYTICS_API_RUNNING=true
+fi
+
+# Pull with the validated new files before changing anything, so a missing or
+# unreachable image stops the update while the running stack is untouched.
+if ((${#PINNED_IMAGE_SETTINGS[@]} == 0)); then
+  printf 'Pulling configured container images...\n'
+  compose_file_arguments "$MERGED_ENV" "$STAGE_DIR" true
+  docker compose \
+    --env-file "$MERGED_ENV" \
+    "${COMPOSE_FILE_ARGUMENTS[@]}" \
+    pull || die "pulling the container images failed; no live files or containers were changed (backup: $BACKUP_RESULT)"
+fi
+
 UPDATE_START_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 UPDATE_STARTED=true
 if ! record_lifecycle_event 'Update started' "$UPDATE_START_TIME"; then
@@ -501,32 +904,61 @@ if ! record_lifecycle_event 'Update started' "$UPDATE_START_TIME"; then
   warn "update start marker deferred until PostgreSQL is available"
 fi
 
+# Each file is written next to its target and renamed over it. A rename never
+# changes the file a running process has open, so this script keeps reading
+# its own copy. update.sh is installed last.
+install_stack_file() {
+  local source_file="$1"
+  local name="$2"
+  local mode="$3"
+  local temporary="$SCRIPT_DIR/.avsm-new.$name"
+  (umask 077 && cp -- "$source_file" "$temporary")
+  chmod "$mode" "$temporary"
+  mv -f -- "$temporary" "$SCRIPT_DIR/$name"
+}
+
 printf 'Installing the validated stack files...\n'
 for managed_file in "${MANAGED_FILES[@]}"; do
-  cp -- "$STAGE_DIR/$managed_file" "$SCRIPT_DIR/$managed_file"
+  case "$managed_file" in
+    update.sh) ;;
+    maintenance.sh) install_stack_file "$STAGE_DIR/$managed_file" "$managed_file" 755 ;;
+    *) install_stack_file "$STAGE_DIR/$managed_file" "$managed_file" 644 ;;
+  esac
 done
-cp -- "$MERGED_ENV" "$SCRIPT_DIR/.env"
-chmod 755 "$SCRIPT_DIR/update.sh"
-chmod 755 "$SCRIPT_DIR/maintenance.sh"
-chmod 600 "$SCRIPT_DIR/.env"
+install_stack_file "$MERGED_ENV" .env 600
+install_stack_file "$STAGE_DIR/update.sh" update.sh 755
 
-METRICS_IMAGE="$(env_value "$SCRIPT_DIR/.env" METRICS_INGEST_IMAGE)"
-case "$METRICS_IMAGE" in
-  *@sha256:*|*:sha-[0-9a-fA-F]*)
-    warn "METRICS_INGEST_IMAGE is pinned to an immutable digest or commit tag"
-    warn "stack files and .env were updated, but containers were not pulled or restarted"
-    warn "review $SCRIPT_DIR/.env, select the intended image, and run this updater again"
-    printf 'Configuration backup: %s\n' "$BACKUP_RESULT"
-    UPDATE_OUTCOME='configuration updated; containers unchanged'
-    exit 2
-    ;;
-esac
+if ((${#PINNED_IMAGE_SETTINGS[@]} > 0)); then
+  for pinned_setting in "${PINNED_IMAGE_SETTINGS[@]}"; do
+    warn "$pinned_setting is pinned to an immutable digest or commit tag"
+  done
+  warn "stack files and .env were updated, but containers were not pulled or restarted"
+  if [[ "$ANALYTICS_API_RUNNING" == true ]]; then
+    warn "the running Analytics API was not restarted: changes to ENABLE_ANALYTICS_API or ANALYTICS_API_TOKEN are NOT applied, so no access was revoked"
+    warn "to revoke Analytics API access now without changing ingestion, run: docker compose stop analytics-api"
+  fi
+  warn "review $SCRIPT_DIR/.env, select the intended image, and run this updater again (or run docker compose up -d --remove-orphans)"
+  printf 'Configuration backup: %s\n' "$BACKUP_RESULT"
+  UPDATE_OUTCOME='configuration updated; containers unchanged'
+  exit 2
+fi
 
-printf 'Pulling configured container images...\n'
+# The Analytics API starts only after its provisioning job, which builds
+# indexes concurrently and can take several minutes on a large table (bounded by
+# ANALYTICS_PROVISION_TIMEOUT). Allow that plus time for ingestion and the API
+# to become healthy.
+WAIT_TIMEOUT_SECONDS=120
+if [[ "$NEW_ENABLE_ANALYTICS_API" == true ]]; then
+  WAIT_TIMEOUT_SECONDS=$((ANALYTICS_PROVISION_SECONDS + 180))
+  printf 'The Analytics API is enabled; first-time database provisioning may take several minutes.\n'
+fi
+
+printf 'Starting the updated containers...\n'
+# --remove-orphans removes containers of services that are no longer selected,
+# such as the Analytics API after ENABLE_ANALYTICS_API changes to false.
 if ! (
   cd "$SCRIPT_DIR" &&
-    docker compose pull &&
-    docker compose up -d --wait --wait-timeout 120 &&
+    docker compose up -d --remove-orphans --wait --wait-timeout "$WAIT_TIMEOUT_SECONDS" &&
     docker compose ps
 ); then
   warn "the container update did not complete"
@@ -535,3 +967,6 @@ if ! (
 fi
 
 printf 'Update complete. Configuration and database backup: %s\n' "$BACKUP_RESULT"
+}
+
+main "$@"; exit "$?"

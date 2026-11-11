@@ -24,15 +24,20 @@ docker exec "$TEST_CONTAINER" psql -X -U metrics_user -d metrics -v ON_ERROR_STO
 docker exec -i "$TEST_CONTAINER" sh -c 'cat > /tmp/avsm/bin/docker; chmod +x /tmp/avsm/bin/docker' <<'ADAPTER'
 #!/bin/bash
 set -eu
-if [[ "$1" == inspect ]]; then printf 'PURGE_HEARTBEAT=true\nHEARTBEAT_RETENTION_DAYS=30\n'; exit 0; fi
+if [[ "$1" == inspect ]]; then
+  if [[ "$*" == *'.State.Health'* ]]; then echo healthy; exit 0; fi
+  printf 'PURGE_HEARTBEAT=true\nHEARTBEAT_RETENTION_DAYS=30\n'; exit 0
+fi
+# Ingestion is restored by container ID, never with "docker compose start".
+if [[ "$1" == start && "$2" == test-ingest ]]; then rm /tmp/avsm/stopped; exit 0; fi
 [[ "$1" == compose ]]; shift
 case "$1" in
-  version|config) exit 0 ;;
+  version) [[ "${2:-}" != --short ]] || echo 2.29.1; exit 0 ;;
+  config) exit 0 ;;
   ps)
     if [[ "$*" == *'--all --quiet metrics-ingest'* ]]; then echo test-ingest; exit 0; fi
     printf 'postgres\n'; [[ -f /tmp/avsm/stopped ]] || printf 'metrics-ingest\n'; exit 0 ;;
   stop) touch /tmp/avsm/stopped ;;
-  start) rm /tmp/avsm/stopped ;;
   exec)
     shift
     [[ "$1" == -T ]]; shift

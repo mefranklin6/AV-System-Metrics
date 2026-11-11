@@ -1,0 +1,685 @@
+openapi: 3.1.0
+info:
+  title: AV-System-Metrics Analytics API
+  version: "1.0.0"
+  summary: Optional, read-only access to AV room and device usage events.
+  description: |
+    The Analytics API is an optional, read-only companion to the AV-System-Metrics
+    self-hosted ingest service. It powers the Metrics Visualizer app and can be used
+    to build your own reporting tools.
+
+    * Every `/api/v1` route requires `Authorization: Bearer <token>`.
+    * All timestamps in responses are RFC 3339 in UTC with exactly six fractional
+      digits, for example `2026-11-11T00:22:09.709041Z`.
+    * Time ranges are half-open: `[from, to)`. When omitted, `to` defaults to the
+      current time and `from` to 30 days before `to`. Timestamps in query strings
+      must include a time zone offset (`Z` or `+hh:mm`); URL-encode `+` as `%2B`.
+    * Unknown query parameters are rejected with `400 bad_request`.
+    * Heartbeat rows (`action = "Heartbeat"`) are excluded unless
+      `include_heartbeats=true`. Heartbeats older than the server's retention
+      (default 30 days) are purged by the ingest service.
+    * The server never filters by client name; synthetic clients such as
+      `AVSM-System` (server lifecycle traces) are returned like any other client.
+    * The source IP address of devices is never exposed.
+
+    ## Rate limits (429)
+
+    Every limit below answers `429 too_many_requests` with a `Retry-After` header
+    in whole seconds. IPv6 addresses are grouped by /64.
+
+    * **Rate limit.** Requests with a valid token are limited per token and
+      client IP address to about 10 requests per second with bursts of up to 40.
+      Requests without a valid token, `/health`, `/openapi.yaml`, and CORS
+      preflights share a separate budget of the same size per client IP address.
+      `Retry-After` is usually `1`.
+    * **Concurrency cap.** At most 3 requests per token and client IP address may
+      be in progress at once. Another request gets `429` with `Retry-After: 1`.
+    * **Failed-authentication lockout.** Ten failed authentication attempts (`401`
+      or `403` for the token) within five minutes block further *failing* requests
+      from that address for fifteen minutes (`Retry-After` up to `900`). A request
+      with a valid token is never blocked by it, so this `429` means the token
+      being sent is missing or not valid.
+
+    Recommended client behaviour: send one request at a time. On `429` with a
+    `Retry-After` of 60 seconds or less, wait that long and retry the same request,
+    a few times at most. Treat a longer `Retry-After` as the lockout: stop and check
+    the token instead of retrying. Retry `503` later with a growing delay (or narrow
+    the query if it timed out). Do not retry `400`, `401`, `403`, `404`, `405`,
+    `414`, or `431` unchanged.
+
+    ## Long query strings (414, 431)
+
+    The API accepts a request line plus headers of about 16 KiB and answers larger
+    requests with `431 Request Header Fields Too Large`. Reverse proxies often have
+    lower limits and may answer `414 URI Too Long` or `431` (nginx allows an 8 KiB
+    request line by default). These responses come from the HTTP server or proxy,
+    not from the API handlers: the body is plain text or HTML rather than the JSON
+    error shape, and it carries no CORS headers, so a browser app sees a network
+    error instead of the status. Keep each encoded query string well under 8 KiB by
+    splitting long `client` lists across several requests (at most 200 values
+    each) and merging the results. The Metrics Visualizer budgets about 6 KiB of
+    encoded query and 200 client names per request, and on a `414` or `431` it
+    repeats the request with the client list split in half.
+
+    ## Truncated results
+
+    `/api/v1/summary` and `/api/v1/heartbeats` cap their output and set
+    `truncated: true` when more data matched. Do not treat a truncated response as
+    complete: split the request by client (take names from `/api/v1/clients`) or
+    into shorter time ranges, repeat until no piece is truncated, and merge the
+    pieces.
+  license:
+    name: See repository LICENSE
+    url: https://github.com/mefranklin6/AV-System-Metrics
+servers:
+  - url: http://127.0.0.1:8081
+    description: Default local address published by Docker Compose
+  - url: https://analytics.example.edu
+    description: Example address behind a TLS reverse proxy
+security:
+  - bearerAuth: []
+tags:
+  - name: Service
+    description: Unauthenticated service endpoints
+  - name: Analytics
+    description: Authenticated read-only analytics endpoints
+paths:
+  /health:
+    get:
+      tags: [Service]
+      operationId: getHealth
+      summary: Service and database health
+      description: |
+        Unauthenticated liveness probe. Returns `200` when the database is reachable,
+        `503` otherwise. Not subject to `ANALYTICS_ALLOWED_NET`, so container and
+        load-balancer probes keep working; it reveals nothing beyond up/down.
+      security: []
+      responses:
+        "200":
+          description: Database reachable
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControl" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+              example: { ok: true }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503":
+          description: Database unreachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+              example: { ok: false }
+  /openapi.yaml:
+    get:
+      tags: [Service]
+      operationId: getOpenAPI
+      summary: This OpenAPI document
+      security: []
+      responses:
+        "200":
+          description: The OpenAPI 3.1 description of this API
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/v1/info:
+    get:
+      tags: [Analytics]
+      operationId: getInfo
+      summary: Server time, data coverage, and heartbeat purge status
+      description: |
+        `activity_range` is the earliest and latest `event_timestamp` of all
+        non-heartbeat events. `heartbeat_purge` reflects the latest heartbeat purge
+        recorded by the ingest service; every field is `null` when no purge has run.
+        This endpoint takes no query parameters.
+      responses:
+        "200":
+          description: Service information
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Info" }
+              example:
+                api_version: "1"
+                server_time: "2026-11-11T00:22:09.709041Z"
+                activity_range:
+                  first_event: "2026-02-03T14:00:01.000000Z"
+                  last_event: "2026-11-11T00:20:55.103221Z"
+                heartbeat_purge:
+                  enabled_status: succeeded
+                  retention_days: 30
+                  cutoff: "2026-10-11T03:00:00.000000Z"
+                  finished_at: "2026-11-10T03:00:12.512000Z"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /api/v1/clients:
+    get:
+      tags: [Analytics]
+      operationId: listClients
+      summary: Clients (rooms) seen in a time range
+      description: |
+        One entry per `clientname` with at least one event (including heartbeats)
+        in `[from, to)`, sorted by `clientname` in binary (code point) order.
+        `event_count`, `first_event`, and `last_event` consider non-heartbeat
+        events only; clients that only sent heartbeats have `event_count` 0 and
+        `null` event timestamps.
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: Clients in the range
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClientsResponse" }
+              example:
+                from: "2026-10-12T00:00:00.000000Z"
+                to: "2026-11-11T00:00:00.000000Z"
+                clients:
+                  - clientname: BSS_245
+                    event_count: 1840
+                    heartbeat_count: 8640
+                    first_event: "2026-10-12T14:01:22.120000Z"
+                    last_event: "2026-11-10T22:15:09.004000Z"
+                    last_heartbeat: "2026-11-10T23:59:40.000000Z"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /api/v1/events:
+    get:
+      tags: [Analytics]
+      operationId: listEvents
+      summary: Raw events, paginated
+      description: |
+        Events in `[from, to)` ordered by (`event_timestamp`, `event_id`) ascending.
+        To fetch every page, repeat the request with the same filters and
+        `cursor` set to the previous response's `next_cursor` until `next_cursor`
+        is `null`. Omit `cursor` for the first page.
+
+        A pass never returns an event twice. Devices buffer events while the
+        server is unreachable and upload them later with their original
+        `event_timestamp`, so an event that arrives during a pass with a time
+        earlier than the cursor is not returned by that pass. Re-fetch recent
+        ranges (at least the last 48 hours) before treating them as final.
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Client"
+        - name: metric
+          in: query
+          description: Exact metric filter. Repeat for several values (at most 50).
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 50
+            items: { type: string, minLength: 1, maxLength: 128 }
+        - name: action
+          in: query
+          description: Exact action filter, such as `Started`, `Stopped`, `Trace`, `Connected`. Repeat for several values (at most 50).
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 50
+            items: { type: string, minLength: 1, maxLength: 128 }
+        - $ref: "#/components/parameters/IncludeHeartbeats"
+        - name: limit
+          in: query
+          description: Maximum events per page.
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 5000, default: 1000 }
+        - name: cursor
+          in: query
+          description: Opaque pagination cursor from a previous `next_cursor`. Must be passed unchanged.
+          required: false
+          schema: { type: string, pattern: "^[A-Za-z0-9_-]{34}$" }
+      responses:
+        "200":
+          description: A page of events
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventsResponse" }
+              example:
+                from: "2026-11-10T00:00:00.000000Z"
+                to: "2026-11-11T00:00:00.000000Z"
+                events:
+                  - id: 2993012
+                    clientname: Holt_171
+                    event_timestamp: "2026-11-10T23:47:27.225600Z"
+                    metric: System - User
+                    action: Stopped
+                    event_id: f5ba6c9f-571c-472c-8d6a-6002f03d8209
+                    received_at: "2026-11-10T23:47:37.295791Z"
+                next_cursor: AQAGX_SzbZMA9bpsn1ccRyyNamAC8D2CCQ
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "414": { $ref: "#/components/responses/URITooLong" }
+        "431": { $ref: "#/components/responses/RequestHeaderFieldsTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /api/v1/summary:
+    get:
+      tags: [Analytics]
+      operationId: getSummary
+      summary: Event counts grouped by client, metric, and action
+      description: |
+        One row per (`clientname`, `metric`, `action`) in `[from, to)`, ordered by
+        those columns in binary order. At most 50,000 rows are returned;
+        `truncated` is `true` when more groups exist. Each returned row is a
+        complete count, but the rows after the cut are missing: repeat the
+        request for fewer clients (split the `client` list, using names from
+        `/api/v1/clients`) or for shorter ranges, and add up the counts of
+        matching rows across time pieces.
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Client"
+        - $ref: "#/components/parameters/IncludeHeartbeats"
+      responses:
+        "200":
+          description: Grouped counts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SummaryResponse" }
+              example:
+                from: "2026-10-12T00:00:00.000000Z"
+                to: "2026-11-11T00:00:00.000000Z"
+                truncated: false
+                rows:
+                  - clientname: BSS_245
+                    metric: hdmi
+                    action: Started
+                    count: 41
+                    first_event: "2026-10-13T15:02:11.000000Z"
+                    last_event: "2026-11-10T19:44:03.120000Z"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "414": { $ref: "#/components/responses/URITooLong" }
+        "431": { $ref: "#/components/responses/RequestHeaderFieldsTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /api/v1/heartbeats:
+    get:
+      tags: [Analytics]
+      operationId: getHeartbeats
+      summary: Heartbeat counts per client per hour or day
+      description: |
+        Heartbeat counts bucketed by UTC hour or day (`date_trunc` on the UTC
+        event time). Only non-empty buckets are returned; a missing bucket means
+        no heartbeat was received (the processor was offline or unreachable).
+        Series are sorted by `clientname` (binary order) and buckets ascend.
+        With `bucket=hour` the range may span at most 92 days. At most 200,000
+        buckets are returned in total (for example about 500 clients for 16 days
+        of hours).
+
+        When `truncated` is `true` the response is incomplete: the last series
+        may be missing buckets and later clients are missing entirely. Keep the
+        series before the last one (they are complete), then request the rest
+        split into smaller pieces: fewer clients per request (split the `client`
+        list, using names from `/api/v1/clients`), shorter time ranges, or
+        `bucket=day`. Repeat until no piece is truncated and merge the series.
+        Never report a truncated response as a room's full online coverage.
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Client"
+        - name: bucket
+          in: query
+          required: false
+          description: Bucket size.
+          schema: { type: string, enum: [hour, day], default: hour }
+      responses:
+        "200":
+          description: Heartbeat series
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HeartbeatsResponse" }
+              example:
+                from: "2026-11-09T00:00:00.000000Z"
+                to: "2026-11-11T00:00:00.000000Z"
+                bucket: hour
+                truncated: false
+                series:
+                  - clientname: BSS_245
+                    buckets:
+                      - start: "2026-11-09T00:00:00.000000Z"
+                        count: 12
+                      - start: "2026-11-09T01:00:00.000000Z"
+                        count: 12
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+        "414": { $ref: "#/components/responses/URITooLong" }
+        "431": { $ref: "#/components/responses/RequestHeaderFieldsTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        One of the tokens configured in `ANALYTICS_API_TOKEN` on the server
+        (comma-separated to allow rotation or per-person tokens).
+  headers:
+    CacheControl:
+      description: Always `no-store`.
+      schema: { type: string, const: no-store }
+    RetryAfter:
+      description: |
+        Whole seconds to wait before retrying. Usually `1` for the rate limit and
+        always `1` for the concurrency cap; up to `900` for the
+        failed-authentication lockout.
+      schema: { type: integer, minimum: 1 }
+    WWWAuthenticate:
+      description: Always `Bearer realm="avsm-analytics"`.
+      schema: { type: string }
+  parameters:
+    From:
+      name: from
+      in: query
+      required: false
+      description: |
+        Inclusive start of the range, RFC 3339 with a time zone offset. Defaults
+        to 30 days before `to`. Must be earlier than `to`; the range may span at
+        most 400 days.
+      schema: { type: string, format: date-time }
+      example: "2026-09-01T00:00:00Z"
+    To:
+      name: to
+      in: query
+      required: false
+      description: Exclusive end of the range, RFC 3339 with a time zone offset. Defaults to now.
+      schema: { type: string, format: date-time }
+      example: "2026-10-01T00:00:00Z"
+    Client:
+      name: client
+      in: query
+      required: false
+      description: |
+        Exact `clientname` filter (case-sensitive). Repeat for several clients,
+        at most 200 values of 1 to 128 characters each; repeated values are
+        ignored. The request line plus headers must fit within about 16 KiB, and
+        reverse proxies often allow less (nginx: an 8 KiB request line), so keep
+        the encoded query string well under 8 KiB: split longer lists across
+        several requests and merge the results (see the `414` and `431`
+        responses).
+      style: form
+      explode: true
+      schema:
+        type: array
+        maxItems: 200
+        items: { type: string, minLength: 1, maxLength: 128 }
+      example: [BSS_245, HOLT_155]
+    IncludeHeartbeats:
+      name: include_heartbeats
+      in: query
+      required: false
+      description: Include `Heartbeat` rows. Only the literal values `true` and `false` are accepted.
+      schema: { type: boolean, default: false }
+  responses:
+    BadRequest:
+      description: A query parameter is missing, malformed, unknown, or out of range.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: bad_request, message: "Parameter 'from' must be earlier than 'to' (the range is [from, to))." } }
+    Unauthorized:
+      description: The Authorization header is missing or malformed.
+      headers:
+        WWW-Authenticate: { $ref: "#/components/headers/WWWAuthenticate" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: unauthorized, message: "Missing Authorization header. Send: Authorization: Bearer <token>." } }
+    Forbidden:
+      description: The token is not valid, the caller's IP address is outside `ANALYTICS_ALLOWED_NET`, or a CORS preflight came from a disallowed origin.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: forbidden, message: "The API token is not valid." } }
+    NotFound:
+      description: No such route.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: not_found, message: "Not found." } }
+    MethodNotAllowed:
+      description: Only GET, HEAD, and OPTIONS are supported.
+      headers:
+        Allow:
+          schema: { type: string, const: "GET, HEAD, OPTIONS" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: method_not_allowed, message: "Only GET, HEAD, and OPTIONS are supported." } }
+    TooManyRequests:
+      description: |
+        One of three limits applies (see the API description): the rate limit
+        (about 10 requests per second, bursts of 40; `Retry-After` usually 1),
+        the concurrency cap (more than 3 requests in progress for the same token
+        and client address; `Retry-After: 1`), or the failed-authentication
+        lockout (only for requests whose token is missing or not valid;
+        `Retry-After` up to 900). Wait `Retry-After` seconds and retry when it is
+        60 or less; otherwise stop and check the token.
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: too_many_requests, message: "Too many requests. Wait for the number of seconds in the Retry-After header, then try again." } }
+    URITooLong:
+      description: |
+        The request line is longer than a reverse proxy in front of the API
+        allows (the API itself answers `431` instead). The body comes from the
+        proxy and is plain text or HTML, not the JSON error shape, and has no
+        CORS headers. Split the `client` list across several requests and retry.
+      content:
+        text/plain:
+          schema: { type: string }
+          example: 414 URI Too Long
+        text/html:
+          schema: { type: string }
+    RequestHeaderFieldsTooLarge:
+      description: |
+        The request line plus headers exceed the API's limit (about 16 KiB) or a
+        reverse proxy's limit. The body is plain text (or HTML from a proxy), not
+        the JSON error shape, and has no CORS headers. Split the `client` list
+        across several requests and retry.
+      content:
+        text/plain:
+          schema: { type: string }
+          example: 431 Request Header Fields Too Large
+        text/html:
+          schema: { type: string }
+    Internal:
+      description: Unexpected server error. Details are logged on the server only.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: internal, message: "Internal server error." } }
+    Unavailable:
+      description: The database is unreachable or the query exceeded its time limit (20 s).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: unavailable, message: "The query took too long. Narrow the date range or filter by fewer rooms and try again." } }
+  schemas:
+    Timestamp:
+      type: string
+      format: date-time
+      description: RFC 3339 UTC timestamp with exactly six fractional digits.
+      pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$"
+      examples: ["2026-11-11T00:22:09.709041Z"]
+    NullableTimestamp:
+      oneOf:
+        - $ref: "#/components/schemas/Timestamp"
+        - type: "null"
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, too_many_requests, internal, unavailable]
+            message:
+              type: string
+              description: Human-readable explanation with a suggested fix. Never echoes request values.
+    Health:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+    Info:
+      type: object
+      additionalProperties: false
+      required: [api_version, server_time, activity_range, heartbeat_purge]
+      properties:
+        api_version: { type: string, const: "1" }
+        server_time: { $ref: "#/components/schemas/Timestamp" }
+        activity_range:
+          type: object
+          additionalProperties: false
+          required: [first_event, last_event]
+          properties:
+            first_event: { $ref: "#/components/schemas/NullableTimestamp" }
+            last_event: { $ref: "#/components/schemas/NullableTimestamp" }
+        heartbeat_purge:
+          type: object
+          additionalProperties: false
+          required: [enabled_status, retention_days, cutoff, finished_at]
+          properties:
+            enabled_status:
+              description: Status of the latest heartbeat purge attempt, or null if none has been recorded.
+              type: [string, "null"]
+              enum: [running, succeeded, failed, null]
+            retention_days: { type: [integer, "null"], minimum: 1 }
+            cutoff: { $ref: "#/components/schemas/NullableTimestamp" }
+            finished_at: { $ref: "#/components/schemas/NullableTimestamp" }
+    Client:
+      type: object
+      additionalProperties: false
+      required: [clientname, event_count, heartbeat_count, first_event, last_event, last_heartbeat]
+      properties:
+        clientname: { type: string, maxLength: 128 }
+        event_count: { type: integer, minimum: 0, description: Non-heartbeat events in the range. }
+        heartbeat_count: { type: integer, minimum: 0 }
+        first_event: { $ref: "#/components/schemas/NullableTimestamp" }
+        last_event: { $ref: "#/components/schemas/NullableTimestamp" }
+        last_heartbeat: { $ref: "#/components/schemas/NullableTimestamp" }
+    ClientsResponse:
+      type: object
+      additionalProperties: false
+      required: [from, to, clients]
+      properties:
+        from: { $ref: "#/components/schemas/Timestamp" }
+        to: { $ref: "#/components/schemas/Timestamp" }
+        clients:
+          type: array
+          items: { $ref: "#/components/schemas/Client" }
+    Event:
+      type: object
+      additionalProperties: false
+      required: [id, clientname, event_timestamp, metric, action, event_id, received_at]
+      properties:
+        id: { type: integer, format: int64 }
+        clientname: { type: string, maxLength: 128 }
+        event_timestamp: { $ref: "#/components/schemas/Timestamp" }
+        metric: { type: string, maxLength: 128 }
+        action: { type: string, maxLength: 128 }
+        event_id: { type: string, format: uuid }
+        received_at: { $ref: "#/components/schemas/Timestamp" }
+    EventsResponse:
+      type: object
+      additionalProperties: false
+      required: [from, to, events, next_cursor]
+      properties:
+        from: { $ref: "#/components/schemas/Timestamp" }
+        to: { $ref: "#/components/schemas/Timestamp" }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to get the next page; null when there are no more events.
+    SummaryRow:
+      type: object
+      additionalProperties: false
+      required: [clientname, metric, action, count, first_event, last_event]
+      properties:
+        clientname: { type: string }
+        metric: { type: string }
+        action: { type: string }
+        count: { type: integer, minimum: 1 }
+        first_event: { $ref: "#/components/schemas/Timestamp" }
+        last_event: { $ref: "#/components/schemas/Timestamp" }
+    SummaryResponse:
+      type: object
+      additionalProperties: false
+      required: [from, to, truncated, rows]
+      properties:
+        from: { $ref: "#/components/schemas/Timestamp" }
+        to: { $ref: "#/components/schemas/Timestamp" }
+        truncated: { type: boolean, description: True when more than 50000 groups matched. }
+        rows:
+          type: array
+          maxItems: 50000
+          items: { $ref: "#/components/schemas/SummaryRow" }
+    HeartbeatBucket:
+      type: object
+      additionalProperties: false
+      required: [start, count]
+      properties:
+        start: { $ref: "#/components/schemas/Timestamp" }
+        count: { type: integer, minimum: 1 }
+    HeartbeatSeries:
+      type: object
+      additionalProperties: false
+      required: [clientname, buckets]
+      properties:
+        clientname: { type: string }
+        buckets:
+          type: array
+          items: { $ref: "#/components/schemas/HeartbeatBucket" }
+    HeartbeatsResponse:
+      type: object
+      additionalProperties: false
+      required: [from, to, bucket, truncated, series]
+      properties:
+        from: { $ref: "#/components/schemas/Timestamp" }
+        to: { $ref: "#/components/schemas/Timestamp" }
+        bucket: { type: string, enum: [hour, day] }
+        truncated: { type: boolean, description: "True when more than 200,000 buckets matched: the last series may be incomplete and later clients are missing. Split the request by client or time and retry." }
+        series:
+          type: array
+          items: { $ref: "#/components/schemas/HeartbeatSeries" }

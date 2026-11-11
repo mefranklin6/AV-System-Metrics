@@ -1,0 +1,37 @@
+{
+    "name": "AV Metrics Visualizer",
+    "short_name": "AV Metrics",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#F4FBFA",
+    "theme_color": "#00696B",
+    "description": "Accessible dashboards of classroom AV room and device usage from AV System Metrics, for data-driven budget and system design decisions.",
+    "lang": "en",
+    "dir": "ltr",
+    "orientation": "any",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}

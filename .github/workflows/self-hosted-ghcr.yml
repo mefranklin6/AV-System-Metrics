@@ -1,7 +1,14 @@
 name: Self-Hosted GHCR
 
+# Operators download the Compose files and scripts straight from main, so pull
+# requests run every test before merge. Images are published only on push and
+# manual runs.
 on:
   push:
+    paths:
+      - "Self_Hosted/**"
+      - ".github/workflows/self-hosted-ghcr.yml"
+  pull_request:
     paths:
       - "Self_Hosted/**"
       - ".github/workflows/self-hosted-ghcr.yml"
@@ -9,20 +16,67 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: self-hosted-ghcr-${{ github.ref }}
-  cancel-in-progress: true
+  # Never interrupt a publish from main halfway through.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   REGISTRY: ghcr.io
   IMAGE_SUFFIX: metrics-ingest
+  ANALYTICS_IMAGE_SUFFIX: analytics-api
 
 jobs:
-  build-and-publish:
-    name: Build and publish Self_Hosted image
+  stack-tests:
+    name: Test the Compose stack and operator scripts
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate Compose configurations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ./Self_Hosted
+          docker compose version
+          validation_env="$(mktemp)"
+          trap 'rm -f -- "$validation_env"' EXIT
+          for analytics in false true; do
+            for expose in false true; do
+              sed -e "s/^ENABLE_ANALYTICS_API=.*/ENABLE_ANALYTICS_API=${analytics}/" \
+                -e "s/^EXPOSE_DATABASE=.*/EXPOSE_DATABASE=${expose}/" .env.example > "$validation_env"
+              docker compose --env-file "$validation_env" \
+                -f docker-compose.yml \
+                -f "docker-compose.database-expose-${expose}.yml" \
+                -f "docker-compose.analytics-${analytics}.yml" \
+                config --quiet
+            done
+          done
+
+      - name: Test self-hosted updater
+        run: bash ./Self_Hosted/update_test.sh
+
+      - name: Test maintenance window
+        run: bash ./Self_Hosted/maintenance_test.sh
+
+      - name: Test maintenance prerequisites with PostgreSQL
+        run: bash ./Self_Hosted/maintenance_integration_test.sh
+
+      - name: Test the Compose stack (default, enable, disable, restart)
+        run: bash ./Self_Hosted/compose_integration_test.sh
+
+  ingest:
+    name: Test and publish metrics-ingest
+    needs: stack-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Check out repository
@@ -34,18 +88,13 @@ jobs:
           go-version-file: ./Self_Hosted/go.mod
           cache-dependency-path: ./Self_Hosted/go.sum
 
+      - name: Vet Go service
+        working-directory: ./Self_Hosted
+        run: go vet ./...
+
       - name: Test Go service
         working-directory: ./Self_Hosted
         run: go test ./...
-
-      - name: Test self-hosted updater
-        run: bash ./Self_Hosted/update_test.sh
-
-      - name: Test maintenance window
-        run: bash ./Self_Hosted/maintenance_test.sh
-
-      - name: Test maintenance prerequisites with PostgreSQL
-        run: bash ./Self_Hosted/maintenance_integration_test.sh
 
       - name: Normalize image name
         id: image
@@ -58,6 +107,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -79,8 +129,108 @@ jobs:
         with:
           context: ./Self_Hosted
           file: ./Self_Hosted/Dockerfile
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Check the image can be pulled anonymously
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          docker logout "$REGISTRY"
+          image="${{ steps.image.outputs.name }}:sha-${GITHUB_SHA::7}"
+          if ! docker manifest inspect "$image" >/dev/null; then
+            echo "::error::$image cannot be pulled without credentials. Make the GHCR package public and link it to this repository."
+            exit 1
+          fi
+
+  analytics-api:
+    name: Test and publish analytics-api
+    needs: stack-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./Self_Hosted/analytics_api/go.mod
+          cache-dependency-path: ./Self_Hosted/analytics_api/go.sum
+
+      - name: Check Analytics API formatting
+        working-directory: ./Self_Hosted/analytics_api
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            printf 'These files need gofmt:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet Analytics API
+        working-directory: ./Self_Hosted/analytics_api
+        run: go vet ./...
+
+      - name: Test Analytics API (race detector)
+        working-directory: ./Self_Hosted/analytics_api
+        run: go test -race -count=1 ./...
+
+      - name: Test Analytics API with PostgreSQL
+        run: bash ./Self_Hosted/analytics_api/analytics_integration_test.sh
+
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          echo "name=${REGISTRY}/${repository}/${ANALYTICS_IMAGE_SUFFIX}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=sha,prefix=sha-
+
+      - name: Build and publish image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./Self_Hosted/analytics_api
+          file: ./Self_Hosted/analytics_api/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=analytics-api
+          cache-to: type=gha,mode=max,scope=analytics-api
+
+      - name: Check the image can be pulled anonymously
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          docker logout "$REGISTRY"
+          image="${{ steps.image.outputs.name }}:sha-${GITHUB_SHA::7}"
+          if ! docker manifest inspect "$image" >/dev/null; then
+            echo "::error::$image cannot be pulled without credentials. Make the GHCR package public and link it to this repository."
+            exit 1
+          fi

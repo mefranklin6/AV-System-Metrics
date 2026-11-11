@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CHECK_ONLY=false
 TIMEOUT_MINUTES=120
 RESTORE_INGEST=false
+RESTORE_ANALYTICS=false
+INGEST_CONTAINER=""
+ANALYTICS_CONTAINER=""
 VACUUM_ACTIVE=false
 WINDOW_STARTED=false
 APP_NAME="avsm-maintenance-$(date +%s)-$$-$RANDOM"
@@ -15,8 +18,9 @@ usage() {
 Usage: bash maintenance.sh [--check] [--timeout-minutes MINUTES]
 
 Run a disk-reclamation maintenance window for metric_events.
-Stops ingestion, runs VACUUM (FULL, ANALYZE), and restores ingestion if it
-was running. Reads and writes to metric_events are blocked during compaction.
+Stops ingestion (and the optional Analytics API), runs VACUUM (FULL, ANALYZE),
+and restores each service that was running. Reads and writes to metric_events
+are blocked during compaction.
 Requires heartbeat purging to be enabled in the existing ingest container
 and a successful purge in the last 26 hours with its original backlog cleared.
 
@@ -51,7 +55,13 @@ cd "$SCRIPT_DIR"
 for command_name in docker flock; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command not found: $command_name"
 done
-docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required"
+# The Compose files use depends_on "required: false", added in Compose 2.20.
+compose_version="$(docker compose version --short 2>/dev/null)" || die "Docker Compose v2 is required"
+compose_version="${compose_version#v}"
+if [[ "$compose_version" =~ ^([0-9]+)\.([0-9]+) ]] &&
+  ((10#${BASH_REMATCH[1]} < 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} < 20))); then
+  die "Docker Compose $compose_version is too old; upgrade the Docker Compose plugin to version 2.20 or newer"
+fi
 docker compose config --quiet
 
 # Keep the lock file in place: removing it would let another process lock a
@@ -78,16 +88,29 @@ cleanup() {
   if [[ "$VACUUM_ACTIVE" == true ]]; then
     printf 'Stopping the maintenance database session...\n'
     if ! termination_result="$(psql_query -Atc "SELECT pg_terminate_backend(pid, 10000) FROM pg_stat_activity WHERE application_name = '$APP_NAME' AND pid <> pg_backend_pid();")" || [[ "$termination_result" == *f* ]]; then
-      printf 'ERROR: Could not stop the maintenance session. Ingestion remains stopped; inspect PostgreSQL before running docker compose start metrics-ingest.\n' >&2
+      printf 'ERROR: Could not stop the maintenance session. Ingestion remains stopped; inspect PostgreSQL before running docker start %s.\n' "${INGEST_CONTAINER:-<metrics-ingest container>}" >&2
+      if [[ "$RESTORE_ANALYTICS" == true ]]; then
+        printf 'ERROR: The Analytics API also remains stopped; start it afterwards with docker start %s.\n' "$ANALYTICS_CONTAINER" >&2
+      fi
       exit 1
     fi
   fi
   if [[ "$RESTORE_INGEST" == true ]]; then
     printf 'Restoring ingestion and waiting for health...\n'
-    if ! docker compose start --wait --wait-timeout 60 metrics-ingest; then
+    if ! restore_container "$INGEST_CONTAINER" 60; then
       printf 'ERROR: Ingestion did not become healthy. Inspect docker compose logs metrics-ingest.\n' >&2
       status=1
       outcome="ingestion restart failed"
+    fi
+  fi
+  if [[ "$RESTORE_ANALYTICS" == true ]]; then
+    printf 'Restoring the Analytics API and waiting for health...\n'
+    if ! restore_container "$ANALYTICS_CONTAINER" 90; then
+      printf 'ERROR: The Analytics API did not become healthy. Inspect docker compose logs analytics-api.\n' >&2
+      if [[ "$status" -eq 0 ]]; then
+        outcome="analytics API restart failed"
+      fi
+      status=1
     fi
   fi
   if [[ "$WINDOW_STARTED" == true ]]; then
@@ -98,6 +121,29 @@ cleanup() {
   fi
   exit "$status"
 }
+
+# Restart exactly the container that maintenance stopped and wait up to
+# MAX_SECONDS for it to become healthy. "docker compose start" would also start
+# the service's dependencies: the provisioning job for the Analytics API, and
+# the one-shot analytics-db-disable job for ingestion, which fails when that
+# exited container has been pruned.
+restore_container() {
+  local container="$1"
+  local max_seconds="$2"
+  local health_state attempt
+  [[ -n "$container" ]] || return 1
+  docker start "$container" >/dev/null || return 1
+  for ((attempt = 1; attempt <= max_seconds; attempt++)); do
+    health_state="$(docker inspect --type container --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")" || return 1
+    case "$health_state" in
+      healthy) return 0 ;;
+      unhealthy|exited|dead) return 1 ;;
+    esac
+    sleep 1
+  done
+  return 1
+}
+
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -105,6 +151,11 @@ trap 'exit 129' HUP
 
 running_services="$(docker compose ps --services --status running)"
 [[ $'\n'"$running_services"$'\n' == *$'\npostgres\n'* ]] || die "PostgreSQL must already be running"
+# The optional Analytics API provisioning job builds indexes concurrently;
+# compaction would wait on (and could time out against) that work.
+if [[ $'\n'"$running_services"$'\n' == *$'\nanalytics-db-provision\n'* ]]; then
+  die "Analytics API database provisioning is still running; wait for it to finish and rerun maintenance"
+fi
 
 check_purge_prerequisites() {
   local ingest_container purge_settings setting_name setting_value purge_complete
@@ -194,12 +245,27 @@ record_lifecycle_event 'Maintenance started'
 WINDOW_STARTED=true
 
 if [[ $'\n'"$running_services"$'\n' == *$'\nmetrics-ingest\n'* ]]; then
+  # The prerequisite check verified there is exactly one ingest container.
+  INGEST_CONTAINER="$(docker compose ps --all --quiet metrics-ingest)" || die "could not find the running ingest container"
+  [[ -n "$INGEST_CONTAINER" && "$INGEST_CONTAINER" != *$'\n'* ]] || die "exactly one running ingest container is required"
   # Set this before stopping so a partially failed stop still restores service.
   RESTORE_INGEST=true
   printf 'Opening maintenance window: stopping ingestion...\n'
   docker compose stop --timeout 30 metrics-ingest
 else
   printf 'Ingestion is already stopped; it will remain stopped after maintenance.\n'
+fi
+
+# The optional Analytics API only reads, but an in-flight query holds a lock
+# that would make VACUUM FULL wait (and fail after its 10-second lock wait
+# limit), and its requests would queue behind the compaction lock anyway.
+if [[ $'\n'"$running_services"$'\n' == *$'\nanalytics-api\n'* ]]; then
+  ANALYTICS_CONTAINER="$(docker compose ps --quiet analytics-api)" || die "could not find the running Analytics API container"
+  [[ -n "$ANALYTICS_CONTAINER" && "$ANALYTICS_CONTAINER" != *$'\n'* ]] || die "exactly one running Analytics API container is required"
+  # Set this before stopping so a partially failed stop still restores service.
+  RESTORE_ANALYTICS=true
+  printf 'Pausing the Analytics API during compaction...\n'
+  docker compose stop --timeout 30 analytics-api
 fi
 
 # Stopping ingestion also stops its purge worker. Recheck the recorded result

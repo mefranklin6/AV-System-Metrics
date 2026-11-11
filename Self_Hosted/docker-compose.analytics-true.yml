@@ -1,0 +1,96 @@
+# Optional read-only Analytics API, selected when ENABLE_ANALYTICS_API=true.
+# Apply changes with: docker compose up -d --remove-orphans
+#
+# YAML anchors do not cross Compose files, so the runtime hardening from
+# docker-compose.yml is repeated here for each service.
+
+services:
+  # One-shot job: creates/updates the restricted metrics_reader role, its
+  # column-level SELECT grants, and supporting indexes. It runs with the
+  # database owner's credentials only on the internal database network and
+  # exits; the long-running API never receives those credentials.
+  analytics-db-provision:
+    image: ${ANALYTICS_API_IMAGE:-ghcr.io/mefranklin6/av-system-metrics/analytics-api:main}
+    pull_policy: ${ANALYTICS_API_PULL_POLICY:-always}
+    command: ["provision"]
+    user: "65532:65532"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    privileged: false
+    init: true
+    read_only: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      # Ingest applies schema.sql at startup, so metric_events exists once it is healthy.
+      metrics-ingest:
+        condition: service_healthy
+    environment:
+      PROVISION_DATABASE_URL: "postgres://metrics_user:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/metrics?sslmode=disable&connect_timeout=5"
+      ANALYTICS_DB_PASSWORD: "${ANALYTICS_DB_PASSWORD:?Set ANALYTICS_DB_PASSWORD in .env when ENABLE_ANALYTICS_API=true}"
+      ANALYTICS_PROVISION_TIMEOUT: "${ANALYTICS_PROVISION_TIMEOUT:-15m}"
+    networks:
+      - db_net
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=16m,mode=1777"
+    pids_limit: ${ANALYTICS_API_PIDS_LIMIT:-100}
+    mem_limit: ${ANALYTICS_API_MEMORY_LIMIT:-256m}
+    cpus: ${ANALYTICS_API_CPUS:-0.50}
+    restart: "no"
+
+  analytics-api:
+    image: ${ANALYTICS_API_IMAGE:-ghcr.io/mefranklin6/av-system-metrics/analytics-api:main}
+    pull_policy: ${ANALYTICS_API_PULL_POLICY:-always}
+    user: "65532:65532"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    privileged: false
+    init: true
+    read_only: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      analytics-db-provision:
+        condition: service_completed_successfully
+    # Serves plain HTTP. Publish it through a TLS reverse proxy; the
+    # ANALYTICS_TLS_* settings are deliberately not passed or mounted here.
+    environment:
+      ADDR: ":8081"
+      ANALYTICS_API_TOKEN: "${ANALYTICS_API_TOKEN:?Set ANALYTICS_API_TOKEN in .env when ENABLE_ANALYTICS_API=true}"
+      ANALYTICS_DATABASE_URL: "postgres://metrics_reader:${ANALYTICS_DB_PASSWORD:?Set ANALYTICS_DB_PASSWORD in .env when ENABLE_ANALYTICS_API=true}@postgres:5432/metrics?sslmode=disable&connect_timeout=5"
+      ANALYTICS_ALLOWED_NET: "${ANALYTICS_ALLOWED_NET:-}"
+      ANALYTICS_CORS_ORIGINS: "${ANALYTICS_CORS_ORIGINS:-}"
+    ports:
+      - "${ANALYTICS_HOST:-127.0.0.1}:${ANALYTICS_PORT:-8081}:8081"
+    networks:
+      - analytics_net
+      - db_net
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=16m,mode=1777"
+    pids_limit: ${ANALYTICS_API_PIDS_LIMIT:-100}
+    mem_limit: ${ANALYTICS_API_MEMORY_LIMIT:-256m}
+    cpus: ${ANALYTICS_API_CPUS:-0.50}
+    healthcheck:
+      test: ["CMD", "/app/analytics-api", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+networks:
+  # Published API traffic only; separate from the ingest network (app_net).
+  analytics_net:
+    driver: bridge

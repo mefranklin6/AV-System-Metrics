@@ -1,0 +1,18 @@
+// Application-level settings for the Runner target.
+//
+// This may be replaced with something auto-generated from metadata (e.g., pubspec.yaml) in the
+// future. If not, the values below would default to using the project name when this becomes a
+// 'flutter create' template.
+
+// The application's name (bundle and executable). It stays metrics_visualizer
+// because the Xcode project and scheme refer to metrics_visualizer.app. The
+// user-facing name, "AV Metrics Visualizer", is set as the window title in
+// MainFlutterWindow.swift, the menu titles in MainMenu.xib and
+// CFBundleDisplayName in Info.plist.
+PRODUCT_NAME = metrics_visualizer
+
+// The application's bundle identifier
+PRODUCT_BUNDLE_IDENTIFIER = com.example.metricsVisualizer
+
+// The copyright displayed in application information
+PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.

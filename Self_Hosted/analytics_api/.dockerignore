@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.*
+secrets/
+*.log
+*.out
+*.test
+*_test.go
+*.sh
+*.md
+analytics-api
+analytics-api.exe
